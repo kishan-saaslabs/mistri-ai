@@ -63,7 +63,9 @@ export function toPublicCall(call: CallRecord, apiBaseUrl: string): PublicCall {
   const base = apiBaseUrl.replace(/\/$/, "");
   return {
     ...rest,
-    fileUrl: storagePath ? `${base}/api/calls/${call.id}/file` : call.source_url,
+    fileUrl: storagePath
+      ? `${base}/api/calls/${call.id}/file`
+      : call.source_url,
   };
 }
 
@@ -100,11 +102,17 @@ async function loadActor(userId: string): Promise<UserRecord> {
   return user;
 }
 
-function sameOrg(actor: UserRecord, organizationId: string | null | undefined): boolean {
+function sameOrg(
+  actor: UserRecord,
+  organizationId: string | null | undefined
+): boolean {
   return Boolean(organizationId) && actor.organization_id === organizationId;
 }
 
-async function assertDealAccess(actor: UserRecord, dealId: string): Promise<DealRecord> {
+async function assertDealAccess(
+  actor: UserRecord,
+  dealId: string
+): Promise<DealRecord> {
   uuid.parse(dealId);
   const deal = await DealModel.findById(dealId);
   if (!deal || !sameOrg(actor, deal.organization_id)) {
@@ -120,7 +128,10 @@ async function assertDealAccess(actor: UserRecord, dealId: string): Promise<Deal
   return deal;
 }
 
-async function assertCanAssignDeal(actor: UserRecord, dealId: string | null | undefined) {
+async function assertCanAssignDeal(
+  actor: UserRecord,
+  dealId: string | null | undefined
+) {
   if (!dealId) return;
   uuid.parse(dealId);
   const deal = await DealModel.findById(dealId);
@@ -161,7 +172,8 @@ async function assertCallAccess(actor: UserRecord, call: CallRecord) {
 
 function startTranscription(callId: string) {
   void TranscriptionService.transcribeCall(callId).catch((error) => {
-    const message = error instanceof Error ? error.message : "Transcription failed";
+    const message =
+      error instanceof Error ? error.message : "Transcription failed";
     console.error("Transcription failed:", message);
   });
 }
@@ -219,7 +231,8 @@ export const CallService = {
     await assertCanAssignDeal(actor, input.dealId);
 
     const filename = basename(input.originalName);
-    const label = sanitizeLabel(filename.replace(/\.[^/.]+$/, "")) || "Uploaded call";
+    const label =
+      sanitizeLabel(filename.replace(/\.[^/.]+$/, "")) || "Uploaded call";
 
     const call = await CallModel.create({
       organizationId: actor.organization_id,
@@ -228,7 +241,7 @@ export const CallService = {
       label,
       filename,
       storagePath: input.storedName,
-      status: "processing",
+      status: "PROCESSING",
     });
 
     if (!call) {
@@ -259,7 +272,9 @@ export const CallService = {
     };
   },
 
-  async createFromLink(input: z.infer<typeof linkCallSchema> & { uploadedBy: string }) {
+  async createFromLink(
+    input: z.infer<typeof linkCallSchema> & { uploadedBy: string }
+  ) {
     const actor = await loadActor(input.uploadedBy);
     await assertCanAssignDeal(actor, input.dealId);
 
@@ -273,7 +288,7 @@ export const CallService = {
       label,
       filename: input.url,
       sourceUrl: input.url,
-      status: "processing",
+      status: "PROCESSING",
     });
   },
 };
@@ -328,7 +343,10 @@ export const DealService = {
     }
 
     const targets = await UserModel.findByIds(uniqueIds);
-    if (targets.length !== uniqueIds.length || targets.some((target) => !sameOrg(actor, target.organization_id))) {
+    if (
+      targets.length !== uniqueIds.length ||
+      targets.some((target) => !sameOrg(actor, target.organization_id))
+    ) {
       throw new HttpError(400, "User not found");
     }
 

@@ -32,12 +32,19 @@ export const TranscriptionService = {
     try {
       const filename = call.filename || call.storage_path;
       const ext = extname(filename).toLowerCase();
-      const result = await transcribeAudioFile({
-        absolutePath: resolve(uploadRoot, call.storage_path),
-        filename,
-        mimeType: mimeByExt[ext] ?? "application/octet-stream",
-        audioUrl: call.source_url && /^https?:\/\//i.test(call.source_url) ? call.source_url : undefined,
-      });
+      const result = await transcribeAudioFile(
+        {
+          absolutePath: resolve(uploadRoot, call.storage_path),
+          filename,
+          mimeType: mimeByExt[ext] ?? "application/octet-stream",
+          audioUrl: call.source_url && /^https?:\/\//i.test(call.source_url) ? call.source_url : undefined,
+        },
+        {
+          onJobSubmitted: async () => {
+            await TranscriptionModel.markTranscribing(row.id);
+          },
+        },
+      );
 
       const saved = await TranscriptionModel.markReady(row.id, {
         language: result.language,
@@ -47,12 +54,12 @@ export const TranscriptionService = {
       });
 
       const duration = result.durationSeconds != null ? Math.round(result.durationSeconds) : undefined;
-      await CallModel.updateStatus(callId, "ready", duration);
+      await CallModel.updateStatus(callId, "PYAI_SUCCESS", duration);
       return saved;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Transcription failed";
       await TranscriptionModel.markFailed(row.id, message);
-      await CallModel.updateStatus(callId, "failed");
+      await CallModel.updateStatus(callId, "PYAI_FAILED");
       throw error;
     }
   },

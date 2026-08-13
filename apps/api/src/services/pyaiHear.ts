@@ -204,12 +204,17 @@ async function resolveResult(job: PyaiJob): Promise<unknown> {
   throw new Error("Completed job had neither result nor result_url");
 }
 
-export async function transcribeAudioFile(input: {
-  absolutePath?: string;
-  filename: string;
-  mimeType: string;
-  audioUrl?: string;
-}): Promise<PyaiTranscriptResult> {
+export async function transcribeAudioFile(
+  input: {
+    absolutePath?: string;
+    filename: string;
+    mimeType: string;
+    audioUrl?: string;
+  },
+  hooks?: {
+    onJobSubmitted?: () => Promise<void> | void;
+  },
+): Promise<PyaiTranscriptResult> {
   let bytes: Buffer | undefined;
   if (input.absolutePath) {
     bytes = await readFile(input.absolutePath);
@@ -221,6 +226,8 @@ export async function transcribeAudioFile(input: {
     mimeType: input.mimeType,
     audioUrl: input.audioUrl,
   });
+
+  await hooks?.onJobSubmitted?.();
 
   const job = await waitForJob(String(submitted.job_id));
   const payload = await resolveResult(job);

@@ -132,7 +132,7 @@ export const openApiSpec = {
           label: { type: "string" },
           filename: { type: "string", nullable: true },
           duration_seconds: { type: "integer" },
-          status: { type: "string", enum: ["queued", "processing", "ready", "failed"] },
+          status: { type: "string", enum: ["queued", "PROCESSING", "PYAI_SUCCESS", "PYAI_FAILED"] },
           fileUrl: {
             type: "string",
             format: "uri",
@@ -163,7 +163,18 @@ export const openApiSpec = {
           call_id: { type: "string", format: "uuid" },
           provider: { type: "string", example: "pyai" },
           model: { type: "string", example: "pyai-hear-telephony" },
-          status: { type: "string", enum: ["processing", "ready", "failed"] },
+          status: {
+            type: "string",
+            enum: [
+              "PROCESSING",
+              "PYAI_TRANSCRIBING",
+              "PYAI_SUCCESS",
+              "PYAI_FAILED",
+              "LLM_TRANSCRIBING",
+              "LLM_SUCCESS",
+              "LLM_FAILED",
+            ],
+          },
           language: { type: "string", nullable: true },
           duration_seconds: { type: "number", nullable: true },
           full_text: { type: "string", nullable: true },
@@ -556,7 +567,7 @@ export const openApiSpec = {
         tags: ["Calls"],
         summary: "Upload a recording",
         description:
-          "Multipart upload. Field name must be `file`. Optional `dealId`. Transcription runs in the background via PyAI Hear. Poll GET /api/calls/{id} until status is ready.",
+          "Multipart upload. Field name must be `file`. Optional `dealId`. Transcription runs in the background via PyAI Hear. Poll GET /api/calls/{id} until the transcription status is PYAI_SUCCESS or PYAI_FAILED.",
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,

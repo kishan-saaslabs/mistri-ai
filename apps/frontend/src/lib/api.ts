@@ -61,7 +61,11 @@ export type TranscriptSegment = {
   text: string;
 };
 
-export type TranscriptionStatus = "processing" | "ready" | "failed";
+export type TranscriptionStatus =
+  | "PROCESSING"
+  | "PYAI_TRANSCRIBING"
+  | "PYAI_SUCCESS"
+  | "PYAI_FAILED";
 
 export type Transcription = {
   id: string;

@@ -91,11 +91,11 @@ CREATE TABLE IF NOT EXISTS calls (
   label             TEXT NOT NULL,
   filename          TEXT,
   duration_seconds  INTEGER NOT NULL DEFAULT 0,
-  status            TEXT NOT NULL DEFAULT 'processing',
+  status            TEXT NOT NULL DEFAULT 'PROCESSING',
   storage_path      TEXT,
   source_url        TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT calls_status_check CHECK (status IN ('queued', 'processing', 'ready', 'failed'))
+  CONSTRAINT calls_status_check CHECK (status IN ('queued', 'PROCESSING', 'PYAI_SUCCESS', 'PYAI_FAILED'))
 );
 
 ALTER TABLE calls ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations (id) ON DELETE CASCADE;
@@ -121,6 +121,14 @@ WHERE organization_id IS NULL;
 
 ALTER TABLE calls ALTER COLUMN organization_id SET NOT NULL;
 
+ALTER TABLE calls DROP CONSTRAINT IF EXISTS calls_status_check;
+UPDATE calls SET status = 'PROCESSING' WHERE status IN ('processing', 'PROCESSING');
+UPDATE calls SET status = 'PYAI_SUCCESS' WHERE status IN ('ready', 'PYAI_SUCCESS');
+UPDATE calls SET status = 'PYAI_FAILED' WHERE status IN ('failed', 'PYAI_FAILED');
+ALTER TABLE calls ALTER COLUMN status SET DEFAULT 'PROCESSING';
+ALTER TABLE calls ADD CONSTRAINT calls_status_check
+  CHECK (status IN ('queued', 'PROCESSING', 'PYAI_SUCCESS', 'PYAI_FAILED'));
+
 CREATE INDEX IF NOT EXISTS calls_deal_id_idx ON calls (deal_id);
 CREATE INDEX IF NOT EXISTS calls_created_at_idx ON calls (created_at DESC);
 CREATE INDEX IF NOT EXISTS calls_organization_id_idx ON calls (organization_id);
@@ -131,7 +139,7 @@ CREATE TABLE IF NOT EXISTS transcriptions (
   call_id            UUID NOT NULL REFERENCES calls (id) ON DELETE CASCADE,
   provider           TEXT NOT NULL DEFAULT 'pyai',
   model              TEXT NOT NULL DEFAULT 'pyai-hear',
-  status             TEXT NOT NULL DEFAULT 'processing',
+  status             TEXT NOT NULL DEFAULT 'PROCESSING',
   language           TEXT,
   duration_seconds   NUMERIC,
   full_text          TEXT,
@@ -139,8 +147,32 @@ CREATE TABLE IF NOT EXISTS transcriptions (
   error              TEXT,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT transcriptions_status_check CHECK (status IN ('processing', 'ready', 'failed')),
+  CONSTRAINT transcriptions_status_check CHECK (status IN (
+    'PROCESSING',
+    'PYAI_TRANSCRIBING',
+    'PYAI_SUCCESS',
+    'PYAI_FAILED',
+    'LLM_TRANSCRIBING',
+    'LLM_SUCCESS',
+    'LLM_FAILED'
+  )),
   CONSTRAINT transcriptions_segments_is_array CHECK (jsonb_typeof(segments) = 'array')
 );
+
+ALTER TABLE transcriptions DROP CONSTRAINT IF EXISTS transcriptions_status_check;
+UPDATE transcriptions SET status = 'PROCESSING' WHERE status IN ('processing', 'PROCESSING');
+UPDATE transcriptions SET status = 'PYAI_SUCCESS' WHERE status IN ('ready', 'PYAI_SUCCESS');
+UPDATE transcriptions SET status = 'PYAI_FAILED' WHERE status IN ('failed', 'PYAI_FAILED');
+ALTER TABLE transcriptions ALTER COLUMN status SET DEFAULT 'PROCESSING';
+ALTER TABLE transcriptions ADD CONSTRAINT transcriptions_status_check
+  CHECK (status IN (
+    'PROCESSING',
+    'PYAI_TRANSCRIBING',
+    'PYAI_SUCCESS',
+    'PYAI_FAILED',
+    'LLM_TRANSCRIBING',
+    'LLM_SUCCESS',
+    'LLM_FAILED'
+  ));
 
 CREATE INDEX IF NOT EXISTS transcriptions_call_id_idx ON transcriptions (call_id);
