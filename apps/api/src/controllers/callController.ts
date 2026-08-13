@@ -40,8 +40,8 @@ export const DealController = {
   addUser: asyncHandler(async (req: Request, res: Response) => {
     const actor = requireUser(req);
     const body = addDealUserSchema.parse(req.body);
-    const user = await DealService.addUser(actor.id, String(req.params.id), body.userId);
-    res.status(201).json({ user });
+    const users = await DealService.addUsers(actor.id, String(req.params.id), body.userIds);
+    res.status(201).json({ users });
   }),
 };
 

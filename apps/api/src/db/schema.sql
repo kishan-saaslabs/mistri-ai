@@ -68,7 +68,6 @@ WHERE EXISTS (SELECT 1 FROM deals WHERE organization_id IS NULL)
 UPDATE deals
 SET organization_id = (SELECT id FROM organizations ORDER BY created_at ASC LIMIT 1)
 WHERE organization_id IS NULL;
-
 ALTER TABLE deals ALTER COLUMN organization_id SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS deals_organization_id_idx ON deals (organization_id);

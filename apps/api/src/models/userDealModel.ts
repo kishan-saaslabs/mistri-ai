@@ -28,6 +28,20 @@ export const UserDealModel = {
     );
   },
 
+  addMany(userIds: string[], dealId: string) {
+    if (userIds.length === 0) {
+      return Promise.resolve([] as UserDealRecord[]);
+    }
+    return query<UserDealRecord>(
+      `INSERT INTO user_deals (user_id, deal_id)
+       SELECT uid, $2::uuid
+       FROM unnest($1::uuid[]) AS uid
+       ON CONFLICT (user_id, deal_id) DO NOTHING
+       RETURNING *`,
+      [userIds, dealId],
+    );
+  },
+
   find(userId: string, dealId: string) {
     return queryOne<UserDealRecord>(
       "SELECT * FROM user_deals WHERE user_id = $1 AND deal_id = $2",

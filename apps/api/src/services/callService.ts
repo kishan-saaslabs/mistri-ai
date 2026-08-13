@@ -31,20 +31,11 @@ export const linkCallSchema = z.object({
 });
 
 export const addDealUserSchema = z.object({
-  userId: z.string().uuid(),
+  userIds: z.array(z.string().uuid()).min(1).max(100),
 });
 
 function sanitizeLabel(raw: string) {
   return raw.replace(/[<>]/g, "").trim().slice(0, 200);
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "23505"
-  );
 }
 
 async function loadActor(userId: string): Promise<UserRecord> {
@@ -250,9 +241,9 @@ export const DealService = {
     }));
   },
 
-  async addUser(actorId: string, dealId: string, userId: string) {
+  async addUsers(actorId: string, dealId: string, userIds: string[]) {
     uuid.parse(dealId);
-    uuid.parse(userId);
+    const uniqueIds = [...new Set(userIds)];
     const actor = await loadActor(actorId);
     const deal = await DealModel.findById(dealId);
     if (!deal || !sameOrg(actor, deal.organization_id)) {
@@ -262,22 +253,13 @@ export const DealService = {
       throw new HttpError(403, "Forbidden");
     }
 
-    const target = await UserModel.findById(userId);
-    if (!target || !sameOrg(actor, target.organization_id)) {
+    const targets = await UserModel.findByIds(uniqueIds);
+    if (targets.length !== uniqueIds.length || targets.some((target) => !sameOrg(actor, target.organization_id))) {
       throw new HttpError(400, "User not found");
     }
 
-    try {
-      const membership = await UserDealModel.add(userId, dealId);
-      if (!membership) {
-        throw new HttpError(500, "Could not add user to deal", false);
-      }
-      return toPublicUser(target);
-    } catch (error) {
-      if (isUniqueViolation(error)) {
-        throw new HttpError(409, "User is already mapped to this deal");
-      }
-      throw error;
-    }
+    await UserDealModel.addMany(uniqueIds, dealId);
+    const byId = new Map(targets.map((target) => [target.id, target]));
+    return uniqueIds.map((id) => toPublicUser(byId.get(id)!));
   },
 };

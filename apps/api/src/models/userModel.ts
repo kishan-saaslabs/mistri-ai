@@ -1,5 +1,5 @@
 import type pg from "pg";
-import { queryOne } from "../config/database.js";
+import { query, queryOne } from "../config/database.js";
 
 export const USER_ROLES = ["OWNER", "ADMIN", "TEAM_MEMBER"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
@@ -67,6 +67,13 @@ export const UserModel = {
 
   findById(id: string) {
     return queryOne<UserRecord>("SELECT * FROM users WHERE id = $1", [id]);
+  },
+
+  findByIds(ids: string[]) {
+    if (ids.length === 0) {
+      return Promise.resolve([] as UserRecord[]);
+    }
+    return query<UserRecord>("SELECT * FROM users WHERE id = ANY($1::uuid[])", [ids]);
   },
 
   create(

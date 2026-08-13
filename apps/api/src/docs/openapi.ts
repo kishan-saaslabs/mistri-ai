@@ -207,9 +207,15 @@ export const openApiSpec = {
       },
       AddDealUserRequest: {
         type: "object",
-        required: ["userId"],
+        required: ["userIds"],
         properties: {
-          userId: { type: "string", format: "uuid" },
+          userIds: {
+            type: "array",
+            minItems: 1,
+            maxItems: 100,
+            items: { type: "string", format: "uuid" },
+            description: "User IDs in the same organization to map onto this deal",
+          },
         },
       },
     },
@@ -441,8 +447,9 @@ export const openApiSpec = {
       },
       post: {
         tags: ["Deals"],
-        summary: "Map a user to a deal",
-        description: "OWNER, ADMIN, or the deal creator can add a member. Duplicate mapping returns 409.",
+        summary: "Map users to a deal",
+        description:
+          "OWNER, ADMIN, or the deal creator can map one or more organization users to the deal. Already-mapped users are skipped.",
         security: [{ bearerAuth: [] }],
         parameters: [{ $ref: "#/components/parameters/UuidId" }],
         requestBody: {
@@ -451,12 +458,14 @@ export const openApiSpec = {
         },
         responses: {
           "201": {
-            description: "User mapped to the deal",
+            description: "Users mapped to the deal",
             content: {
               "application/json": {
                 schema: {
                   type: "object",
-                  properties: { user: { $ref: "#/components/schemas/User" } },
+                  properties: {
+                    users: { type: "array", items: { $ref: "#/components/schemas/User" } },
+                  },
                 },
               },
             },
@@ -465,7 +474,6 @@ export const openApiSpec = {
           "401": { description: "Authentication required" },
           "403": { description: "Not allowed to share this deal" },
           "404": { description: "Deal not found" },
-          "409": { description: "User is already mapped to this deal" },
         },
       },
     },
