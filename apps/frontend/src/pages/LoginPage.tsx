@@ -44,7 +44,7 @@ export function LoginPage() {
   return (
     <AuthLayout
       title="Welcome back"
-      subtitle="Sign in to your Mistri AI workspace."
+      subtitle="Deal notes from every call, with receipts."
       footer={
         <>
           Don&apos;t have an account?{" "}

@@ -110,7 +110,7 @@ export function AskBar({
         <Input
           ref={inputRef}
           id="topask"
-          placeholder="Ask Mistri anything about your calls or reps…"
+          placeholder="Ask about a deal…"
           className="h-9 rounded-[7px] bg-background pr-16 pl-9 text-[13px] shadow-none"
           onFocus={openCommand}
           readOnly
@@ -178,7 +178,7 @@ export function AskBar({
                       ref={overlayInputRef}
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
-                      placeholder="Ask Mistri anything about your calls or reps…"
+                      placeholder="Ask about a deal…"
                       className="h-11 w-full bg-transparent pr-4 pl-9 text-[13.5px] outline-none"
                     />
                   </form>

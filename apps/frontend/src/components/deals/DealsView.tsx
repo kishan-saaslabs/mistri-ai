@@ -99,8 +99,8 @@ export function DealsView() {
         </div>
         <h1 className="mb-2 text-xl font-semibold">Welcome to Mistri AI</h1>
         <p className="mx-auto mb-[26px] max-w-[44ch] text-[13.5px] text-muted-foreground">
-          Create your first deal to start organizing calls as they come in. Once
-          a deal exists, incoming calls can be mapped to it.
+          Create a deal, drop a recording on it, and get notes with receipts
+          back to the call.
         </p>
         <form onSubmit={submit} className="mx-auto mb-4 flex max-w-[420px] gap-2">
           <Input
@@ -132,7 +132,7 @@ export function DealsView() {
     <div className="mx-auto w-full max-w-[760px] px-7 pt-8 pb-[60px]">
       <h1 className="text-[22px] font-semibold tracking-tight">Overview</h1>
       <p className="mt-0.5 text-[13px] text-muted-foreground">
-        Select a deal from the list, or create a new one.
+        Select a deal, then add a recording. Notes live on the call.
       </p>
 
       <div className="mt-5 grid grid-cols-3 gap-3">

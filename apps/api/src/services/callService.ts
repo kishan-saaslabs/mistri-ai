@@ -13,6 +13,10 @@ import { existsSync } from "node:fs";
 import type { Request } from "express";
 import { env } from "../config/env.js";
 import { CallModel, type CallRecord } from "../models/callModel.js";
+import {
+  CallInsightModel,
+  type CallInsightRecord,
+} from "../models/callInsightModel.js";
 import { CallTranscriptModel } from "../models/callTranscriptModel.js";
 import { DealModel, type DealRecord } from "../models/dealModel.js";
 import { UserDealModel } from "../models/userDealModel.js";
@@ -206,6 +210,16 @@ function toPublicTranscription<T extends { provider_job_id?: string | null }>(ro
   return rest;
 }
 
+function toPublicInsights(row: CallInsightRecord) {
+  return {
+    summary: row.summary ?? [],
+    objections: row.objections ?? [],
+    customer_wants: row.customer_wants ?? [],
+    next_steps: row.next_steps ?? [],
+    follow_up_email: row.follow_up_email,
+  };
+}
+
 function namedSegmentList(segments: unknown) {
   if (Array.isArray(segments)) {
     return segments;
@@ -265,7 +279,15 @@ export const CallService = {
   async get(actorId: string, id: string) {
     const call = await CallService.requireCall(actorId, id);
     const transcriptions = await transcriptionsForCall(call);
-    return { call, transcriptions };
+    const latest = transcriptions[0];
+    const insightRow = latest
+      ? await CallInsightModel.findByTranscriptionId(latest.id)
+      : null;
+    return {
+      call,
+      transcriptions,
+      insights: insightRow ? toPublicInsights(insightRow) : null,
+    };
   },
 
   async audioFile(actorId: string, id: string) {

@@ -14,13 +14,6 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { MorphIn, SkeletonLine } from "@/components/ui/skeleton";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -29,10 +22,13 @@ import {
 import { formatDuration } from "@/lib/format";
 import {
   callsApi,
+  callStageLabel,
   isFailedStatus,
-  isPendingStatus,
+  isPipelinePending,
   type Call,
   type CallDetail,
+  type CallInsights,
+  type InsightEvidence,
   type TranscriptSegment,
   type Transcription,
 } from "@/lib/api";
@@ -48,57 +44,14 @@ const SPEAKER_TONES = [
   { border: "border-l-danger", pill: "bg-danger-tint text-danger" },
 ] as const;
 
-// ponytail: intel is hardcoded until the analysis API exists
-const DEMO_INTEL = {
-  runStatus: "Shipped",
-  summary: {
-    title: "Ready to move forward on Pro",
-    desc: "Customer confirmed readiness to proceed with the Pro plan after discussing pricing.",
-    segId: "seg_0003",
-    quote: "we're ready to move forward with the Pro plan",
-  },
-  objection: {
-    title: "Pricing higher than today",
-    desc: "Customer said pricing is higher than their current spend.",
-    segId: "seg_0002",
-    quote: "pricing gave us pause",
-  },
-  intent: {
-    title: "Buy Pro 86%",
-    segId: "seg_0003",
-    quote: "ready to move forward with the Pro plan",
-  },
-  nextSteps: [
-    {
-      text: "Send security documentation today",
-      owner: "REP",
-      segId: "seg_0004",
-      quote: "I'll get the security docs over today",
-    },
-    {
-      text: "Review proposal and follow up Friday",
-      owner: "CUSTOMER",
-      segId: "seg_0005",
-      quote: "circle back Friday",
-    },
-  ],
-  email: {
-    subject: "Acme Pro renewal — security docs + Friday check-in",
-    body: "Hi team,",
-  },
-};
-
 const POLL_MS = 5_000;
-
-function isPending(detail: CallDetail) {
-  return (
-    isPendingStatus(detail.call.status) ||
-    detail.transcriptions.some((row) => isPendingStatus(row.status))
-  );
-}
 
 function latestTranscription(rows: Transcription[]) {
   return rows[0] ?? null;
+}
+
+function pipelineStatus(detail: CallDetail) {
+  return latestTranscription(detail.transcriptions)?.status ?? detail.call.status;
 }
 
 function visibleSegments(row: Transcription | null): TranscriptSegment[] {
@@ -124,19 +77,10 @@ function displaySpeaker(seg: TranscriptSegment) {
   return prettySpeaker(speakerKey(seg.speaker));
 }
 
-function shortId(id: string) {
-  return id.replaceAll("-", "").slice(0, 8);
-}
-
-function modelLabel(model: string | undefined) {
-  if (!model) return "—";
-  return model.replace(/^pyai-hear-/, "");
-}
-
 function uniqueSpeakerKeys(segments: TranscriptSegment[]) {
   const keys: string[] = [];
   for (const seg of segments) {
-    const key = displaySpeaker(seg);
+    const key = speakerKey(seg.speaker);
     if (!keys.includes(key)) keys.push(key);
   }
   return keys;
@@ -187,14 +131,6 @@ function segmentEnd(seg: TranscriptSegment, segments: TranscriptSegment[]) {
   return index >= 0 ? segments[index + 1]?.start ?? null : null;
 }
 
-type Evidence = {
-  segId: string;
-  speaker: string;
-  time: string;
-  quote: string;
-  targetId: string | null;
-};
-
 function downloadText(filename: string, content: string, type: string) {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
@@ -226,46 +162,69 @@ function transcriptLines(segments: TranscriptSegment[]) {
   }));
 }
 
-function intelExport(pending: boolean) {
+function firstEvidence(evidence?: InsightEvidence[]) {
+  return evidence?.[0] ?? null;
+}
+
+function hasInsights(insights: CallInsights | null | undefined) {
+  if (!insights) return false;
+  return (
+    insights.summary.length > 0 ||
+    insights.objections.length > 0 ||
+    insights.customer_wants.length > 0 ||
+    insights.next_steps.length > 0 ||
+    insights.follow_up_email != null
+  );
+}
+
+function intelExport(insights: CallInsights | null, stage: string) {
+  if (!insights || !hasInsights(insights)) {
+    return { "Run status": stage };
+  }
   return {
-    "Run status": pending ? "Processing" : DEMO_INTEL.runStatus,
-    Summary: {
-      title: DEMO_INTEL.summary.title,
-      description: DEMO_INTEL.summary.desc,
-      segment: DEMO_INTEL.summary.segId,
-    },
-    Objections: {
-      title: DEMO_INTEL.objection.title,
-      description: DEMO_INTEL.objection.desc,
-      segment: DEMO_INTEL.objection.segId,
-    },
-    Intent: {
-      title: DEMO_INTEL.intent.title,
-      segment: DEMO_INTEL.intent.segId,
-    },
-    "Next steps": DEMO_INTEL.nextSteps.map((step) => ({
-      text: step.text,
-      owner: step.owner,
-      segment: step.segId,
+    "Run status": stage,
+    Summary: insights.summary.map((item) => ({
+      title: item.title,
+      description: item.text,
+      evidence: item.evidence,
     })),
-    "Follow-up email": {
-      subject: DEMO_INTEL.email.subject,
-      body: DEMO_INTEL.email.body,
-    },
+    Objections: insights.objections.map((item) => ({
+      title: item.title,
+      description: item.text,
+      evidence: item.evidence,
+    })),
+    "Customer wants": insights.customer_wants.map((item) => ({
+      label: item.label,
+      confidence: item.confidence,
+      evidence: item.evidence,
+    })),
+    "Next steps": insights.next_steps.map((item) => ({
+      text: item.text,
+      owner: item.owner,
+      evidence: item.evidence,
+    })),
+    "Follow-up email": insights.follow_up_email
+      ? {
+          subject: insights.follow_up_email.subject,
+          body: insights.follow_up_email.body,
+          evidence: insights.follow_up_email.evidence,
+        }
+      : null,
   };
 }
 
 function toExportJson(
   scope: ExportScope,
   segments: TranscriptSegment[],
-  pending: boolean
+  insights: CallInsights | null,
+  stage: string
 ) {
   const out: Record<string, unknown> = {};
   if (scope === "transcript" || scope === "both") {
     out.Transcript = transcriptLines(segments);
   }
   if (scope === "intel" || scope === "both") {
-    out.Intel = intelExport(pending);
+    out.Intel = intelExport(insights, stage);
   }
   return out;
 }
@@ -274,7 +233,8 @@ function toExportMarkdown(
   title: string,
   scope: ExportScope,
   segments: TranscriptSegment[],
-  pending: boolean
+  insights: CallInsights | null,
+  stage: string
 ) {
   const lines = [`# ${title}`, ""];
   if (scope === "transcript" || scope === "both") {
@@ -289,50 +249,47 @@ function toExportMarkdown(
     }
   }
   if (scope === "intel" || scope === "both") {
-    const intel = intelExport(pending);
-    lines.push("## Intel", "");
-    lines.push("### Run status", "", intel["Run status"], "");
-    lines.push(
-      "### Summary",
-      "",
-      `**${intel.Summary.title}**`,
-      "",
-      intel.Summary.description,
-      "",
-      intel.Summary.segment,
-      ""
-    );
-    lines.push(
-      "### Objections",
-      "",
-      `**${intel.Objections.title}**`,
-      "",
-      intel.Objections.description,
-      "",
-      intel.Objections.segment,
-      ""
-    );
-    lines.push(
-      "### Intent",
-      "",
-      `**${intel.Intent.title}**`,
-      "",
-      intel.Intent.segment,
-      ""
-    );
-    lines.push("### Next steps", "");
-    for (const step of intel["Next steps"]) {
-      lines.push(`- ${step.text} (${step.owner})`);
+    lines.push("## Intel", "", `### Run status`, "", stage, "");
+    if (!insights || !hasInsights(insights)) {
+      lines.push("_Deal notes are not ready yet._", "");
+      return lines.join("\n").trimEnd() + "\n";
     }
-    lines.push("");
-    lines.push(
-      "### Follow-up email",
-      "",
-      `**${intel["Follow-up email"].subject}**`,
-      "",
-      intel["Follow-up email"].body,
-      ""
-    );
+    if (insights.summary.length) {
+      lines.push("### Summary", "");
+      for (const item of insights.summary) {
+        lines.push(`**${item.title}**`, "", item.text, "");
+      }
+    }
+    if (insights.objections.length) {
+      lines.push("### Objections", "");
+      for (const item of insights.objections) {
+        lines.push(`**${item.title}**`, "", item.text, "");
+      }
+    }
+    if (insights.customer_wants.length) {
+      lines.push("### Customer wants", "");
+      for (const item of insights.customer_wants) {
+        lines.push(`- ${item.label} (${item.confidence})`);
+      }
+      lines.push("");
+    }
+    if (insights.next_steps.length) {
+      lines.push("### Next steps", "");
+      for (const step of insights.next_steps) {
+        lines.push(`- ${step.text} (${step.owner})`);
+      }
+      lines.push("");
+    }
+    if (insights.follow_up_email) {
+      lines.push(
+        "### Follow-up email",
+        "",
+        `**${insights.follow_up_email.subject}**`,
+        "",
+        insights.follow_up_email.body,
+        ""
+      );
+    }
   }
   return lines.join("\n").trimEnd() + "\n";
 }
@@ -342,7 +299,6 @@ export function CallDetailView() {
   const { setActiveDealId } = useOutletContext<DealsOutletContext>();
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [activePlayId, setActivePlayId] = useState<string | null>(null);
-  const [evidence, setEvidence] = useState<Evidence | null>(null);
   const [seek, setSeek] = useState<{
     at: number;
     until: number | null;
@@ -354,7 +310,7 @@ export function CallDetailView() {
     queryFn: () => callsApi.get(id),
     enabled: Boolean(id),
     refetchInterval: (q) =>
-      q.state.data && isPending(q.state.data) ? POLL_MS : false,
+      q.state.data && isPipelinePending(q.state.data) ? POLL_MS : false,
   });
   const data = callQuery.data ?? null;
   const loading = callQuery.isPending;
@@ -365,7 +321,7 @@ export function CallDetailView() {
     return () => setActiveDealId(null);
   }, [data?.call.deal_id, setActiveDealId]);
 
-  const pending = data ? isPending(data) : false;
+  const pending = data ? isPipelinePending(data) : false;
 
   const transcription = data ? latestTranscription(data.transcriptions) : null;
   const segments = useMemo(
@@ -384,8 +340,9 @@ export function CallDetailView() {
   }, [id]);
 
   useEffect(() => {
-    if (!activePlayId) return;
-    const row = document.getElementById(`row-${activePlayId}`);
+    const rowId = activePlayId ?? highlightId;
+    if (!rowId) return;
+    const row = document.getElementById(`row-${rowId}`);
     const list = listRef.current;
     if (!row || !list) return;
     const rowRect = row.getBoundingClientRect();
@@ -396,37 +353,16 @@ export function CallDetailView() {
         behavior: reduce ? "instant" : "smooth",
       });
     }
-  }, [activePlayId, reduce]);
+  }, [activePlayId, highlightId, reduce]);
 
   function requestSeek(at: number, until: number | null = null) {
     setSeek((prev) => ({ at, until, n: (prev?.n ?? 0) + 1 }));
   }
 
-  function openEvidence(segId: string, fallbackQuote?: string) {
+  function openEvidence(segId: string) {
     const target = resolveSeg(segId, segments);
-    const fromTranscript = target?.text.trim();
-    const snippet = fallbackQuote?.trim();
-    const quote =
-      fromTranscript &&
-      snippet &&
-      fromTranscript.toLowerCase().includes(snippet.toLowerCase())
-        ? snippet
-        : fromTranscript || snippet || "—";
-    setEvidence({
-      segId,
-      speaker: target ? displaySpeaker(target) : "speaker_1",
-      time: target?.start != null ? formatDuration(target.start) : "—",
-      quote,
-      targetId: target?.id ?? null,
-    });
-  }
-
-  function jumpToTranscript() {
-    const targetId = evidence?.targetId;
-    setEvidence(null);
-    if (!targetId) return;
+    const targetId = target?.id ?? null;
     setHighlightId(targetId);
-    const target = segments.find((seg) => seg.id === targetId);
     if (target?.start != null) {
       requestSeek(target.start, segmentEnd(target, segments));
     }
@@ -459,9 +395,11 @@ export function CallDetailView() {
     );
   }
 
-  const { call } = data;
+  const { call, insights } = data;
   const duration = transcription?.duration_seconds ?? call.duration_seconds;
   const audioSrc = playbackSrc(call);
+  const stage = pipelineStatus(data);
+  const stageLabel = callStageLabel(stage);
   const failed =
     isFailedStatus(call.status) ||
     (transcription != null && isFailedStatus(transcription.status));
@@ -488,14 +426,21 @@ export function CallDetailView() {
             {pending ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-tint px-2 py-0.5 font-mono text-[11px] font-medium text-warning">
                 <span className="size-1.5 animate-pulse rounded-full bg-warning" />
-                Processing
+                {stageLabel}
               </span>
-            ) : null}
+            ) : failed ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-danger-tint px-2 py-0.5 font-mono text-[11px] font-medium text-danger">
+                {stageLabel}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-success-tint px-2 py-0.5 font-mono text-[11px] font-medium text-success">
+                {stageLabel}
+              </span>
+            )}
             <p className="font-mono text-[11.5px] text-muted-foreground">
-              {shortId(call.id)} · {modelLabel(transcription?.model)} ·{" "}
               {formatDuration(duration)} · {segments.length} line
-              {segments.length === 1 ? "" : "s"} ({speakerKeys.length} speaker
-              {speakerKeys.length === 1 ? "" : "s"})
+              {segments.length === 1 ? "" : "s"} · {speakerKeys.length} speaker
+              {speakerKeys.length === 1 ? "" : "s"}
             </p>
           </div>
         </div>
@@ -505,14 +450,16 @@ export function CallDetailView() {
             fileBase={fileBase}
             callLabel={call.label}
             segments={segments}
-            pending={pending}
+            insights={insights}
+            stage={stageLabel}
           />
           <ExportMenu
             format="json"
             fileBase={fileBase}
             callLabel={call.label}
             segments={segments}
-            pending={pending}
+            insights={insights}
+            stage={stageLabel}
           />
         </div>
       </div>
@@ -599,7 +546,7 @@ export function CallDetailView() {
                             tone.pill
                           )}
                         >
-                          {key}
+                          {displaySpeaker(seg)}
                         </span>
                         <p className="mt-1 text-[13.5px] leading-normal">
                           {seg.text}
@@ -622,14 +569,15 @@ export function CallDetailView() {
           ) : null}
         </section>
 
-        <IntelPanel pending={pending} onEvidence={openEvidence} />
+        <IntelPanel
+          pending={pending}
+          failed={failed}
+          error={transcription?.error}
+          stage={stage}
+          insights={insights}
+          onEvidence={openEvidence}
+        />
       </div>
-
-      <EvidenceModal
-        evidence={evidence}
-        onClose={() => setEvidence(null)}
-        onJump={jumpToTranscript}
-      />
     </div>
   );
 }
@@ -756,13 +704,46 @@ function CallDetailSkeleton() {
   );
 }
 
+function intelHeaderLabel(
+  pending: boolean,
+  failed: boolean,
+  ready: boolean
+) {
+  if (pending) return "processing";
+  if (failed) return "failed";
+  if (ready) return "ready";
+  return "waiting";
+}
+
+function IntelEmpty({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="flex min-h-[180px] flex-col items-center justify-center px-4 text-center">
+      <p className="text-[13px] font-medium">{title}</p>
+      <p className="mt-1 max-w-[42ch] text-[12.5px] text-muted-foreground">
+        {body}
+      </p>
+    </div>
+  );
+}
+
 function IntelPanel({
   pending,
+  failed,
+  error,
+  stage,
+  insights,
   onEvidence,
 }: {
   pending: boolean;
-  onEvidence: (segId: string, quote?: string) => void;
+  failed: boolean;
+  error: string | null | undefined;
+  stage: Call["status"];
+  insights: CallInsights | null;
+  onEvidence: (segId: string) => void;
 }) {
+  const ready = hasInsights(insights);
+  const stageLabel = callStageLabel(stage);
+
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-background">
       <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
@@ -772,99 +753,194 @@ function IntelPanel({
         <span
           className={cn(
             "font-mono text-[10.5px]",
-            pending ? "text-warning" : "text-muted-foreground"
+            pending
+              ? "text-warning"
+              : failed
+                ? "text-danger"
+                : "text-muted-foreground"
           )}
         >
-          {pending ? "processing" : "shipped"}
+          {intelHeaderLabel(pending, failed, ready)}
         </span>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-          Run status
-        </h4>
-        <p className="mb-4 flex items-center gap-1.5 text-[13px] font-medium">
-          <span
-            className={cn(
-              "size-[7px] rounded-full",
-              pending ? "animate-pulse bg-warning" : "bg-success"
-            )}
+        {failed ? (
+          <IntelEmpty
+            title="Notes could not be written"
+            body={
+              error ||
+              "The recording failed before deal notes could be generated."
+            }
           />
-          <span className={pending ? "text-warning" : undefined}>
-            {pending ? "Processing" : DEMO_INTEL.runStatus}
-          </span>
-        </p>
+        ) : pending && !ready ? (
+          <IntelEmpty
+            title={
+              stage === "PYAI_SUCCESS" ||
+              stage === "LLM_TRANSCRIBING" ||
+              stage === "LLM_SUCCESS"
+                ? "Writing deal notes…"
+                : "Transcribing this call…"
+            }
+            body={
+              stage === "PYAI_SUCCESS" ||
+              stage === "LLM_TRANSCRIBING" ||
+              stage === "LLM_SUCCESS"
+                ? "The transcript is in. Speaker names and notes with receipts come next."
+                : "This recording stays on the deal. Notes appear here with a receipt back to the line."
+            }
+          />
+        ) : !ready ? (
+          <IntelEmpty
+            title="No deal notes yet"
+            body="Notes with receipts show up here after this call finishes processing."
+          />
+        ) : (
+          <>
+            <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+              Run status
+            </h4>
+            <p className="mb-4 flex items-center gap-1.5 text-[13px] font-medium">
+              <span className="size-[7px] rounded-full bg-success" />
+              {stageLabel}
+            </p>
 
-        <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-          Summary
-        </h4>
-        <InsightCard
-          bar="bg-success"
-          title={DEMO_INTEL.summary.title}
-          desc={DEMO_INTEL.summary.desc}
-          segId={DEMO_INTEL.summary.segId}
-          quote={DEMO_INTEL.summary.quote}
-          onEvidence={onEvidence}
-        />
+            {insights!.summary.length > 0 ? (
+              <>
+                <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+                  Summary
+                </h4>
+                <div className="space-y-3">
+                  {insights!.summary.map((item, index) => {
+                    const evidence = firstEvidence(item.evidence);
+                    return (
+                      <InsightCard
+                        key={`${item.title}-${index}`}
+                        bar="bg-success"
+                        title={item.title}
+                        desc={item.text}
+                        evidence={evidence}
+                        onEvidence={onEvidence}
+                      />
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
 
-        <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-          Objections
-        </h4>
-        <InsightCard
-          bar="bg-danger"
-          title={DEMO_INTEL.objection.title}
-          desc={DEMO_INTEL.objection.desc}
-          segId={DEMO_INTEL.objection.segId}
-          quote={DEMO_INTEL.objection.quote}
-          onEvidence={onEvidence}
-        />
+            {insights!.objections.length > 0 ? (
+              <>
+                <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+                  Objections
+                </h4>
+                <div className="space-y-3">
+                  {insights!.objections.map((item, index) => {
+                    const evidence = firstEvidence(item.evidence);
+                    return (
+                      <InsightCard
+                        key={`${item.title}-${index}`}
+                        bar="bg-danger"
+                        title={item.title}
+                        desc={item.text}
+                        evidence={evidence}
+                        onEvidence={onEvidence}
+                      />
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
 
-        <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-          Intent
-        </h4>
-        <InsightCard
-          bar="bg-brand"
-          title={DEMO_INTEL.intent.title}
-          segId={DEMO_INTEL.intent.segId}
-          quote={DEMO_INTEL.intent.quote}
-          onEvidence={onEvidence}
-        />
+            {insights!.customer_wants.length > 0 ? (
+              <>
+                <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+                  Customer wants
+                </h4>
+                <div className="space-y-3">
+                  {insights!.customer_wants.map((item, index) => {
+                    const evidence = firstEvidence(item.evidence);
+                    return (
+                      <InsightCard
+                        key={`${item.label}-${index}`}
+                        bar="bg-brand"
+                        title={item.label}
+                        desc={`${item.confidence} confidence`}
+                        evidence={evidence}
+                        onEvidence={onEvidence}
+                      />
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
 
-        <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-          Next steps
-        </h4>
-        <ul>
-          {DEMO_INTEL.nextSteps.map((step) => (
-            <li
-              key={step.text}
-              className="flex items-center gap-2 border-b border-border py-2 text-[12.5px] last:border-b-0"
-            >
-              <Circle className="size-3 shrink-0 text-muted-foreground" />
-              <button
-                type="button"
-                className="min-w-0 flex-1 text-left hover:text-brand"
-                onClick={() => onEvidence(step.segId, step.quote)}
-              >
-                {step.text}
-                <ArrowUpRight className="ml-0.5 inline size-3 text-brand" />
-              </button>
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground uppercase">
-                {step.owner}
-              </span>
-            </li>
-          ))}
-        </ul>
+            {insights!.next_steps.length > 0 ? (
+              <>
+                <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+                  Next steps
+                </h4>
+                <ul>
+                  {insights!.next_steps.map((step, index) => {
+                    const evidence = firstEvidence(step.evidence);
+                    return (
+                      <li
+                        key={`${step.text}-${index}`}
+                        className="flex items-center gap-2 border-b border-border py-2 text-[12.5px] last:border-b-0"
+                      >
+                        <Circle className="size-3 shrink-0 text-muted-foreground" />
+                        {evidence ? (
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 text-left hover:text-brand"
+                            onClick={() => onEvidence(evidence.segmentId)}
+                          >
+                            {step.text}
+                            <ArrowUpRight className="ml-0.5 inline size-3 text-brand" />
+                          </button>
+                        ) : (
+                          <span className="min-w-0 flex-1">{step.text}</span>
+                        )}
+                        <span className="shrink-0 font-mono text-[10px] text-muted-foreground uppercase">
+                          {step.owner}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            ) : null}
 
-        <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-          Follow-up email
-        </h4>
-        <div className="rounded-md bg-muted px-3 py-2.5">
-          <p className="text-[12.5px] font-semibold">
-            {DEMO_INTEL.email.subject}
-          </p>
-          <p className="mt-1 text-[12.5px] text-ink-soft">
-            {DEMO_INTEL.email.body}
-          </p>
-        </div>
+            {insights!.follow_up_email ? (
+              <>
+                <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+                  Follow-up email
+                </h4>
+                <div className="rounded-md bg-muted px-3 py-2.5">
+                  <p className="text-[12.5px] font-semibold">
+                    {insights!.follow_up_email.subject}
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-[12.5px] text-ink-soft">
+                    {insights!.follow_up_email.body}
+                  </p>
+                  {firstEvidence(insights!.follow_up_email.evidence) ? (
+                    <button
+                      type="button"
+                      className="mt-2 inline-flex items-center gap-0.5 font-mono text-[10.5px] text-brand hover:underline"
+                      onClick={() =>
+                        onEvidence(
+                          firstEvidence(insights!.follow_up_email!.evidence)!
+                            .segmentId
+                        )
+                      }
+                    >
+                      <ArrowUpRight className="size-3" />
+                      Play receipt
+                    </button>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
+          </>
+        )}
       </div>
     </section>
   );
@@ -874,16 +950,14 @@ function InsightCard({
   bar,
   title,
   desc,
-  segId,
-  quote,
+  evidence,
   onEvidence,
 }: {
   bar: string;
   title: string;
   desc?: string;
-  segId: string;
-  quote?: string;
-  onEvidence: (segId: string, quote?: string) => void;
+  evidence: InsightEvidence | null;
+  onEvidence: (segId: string) => void;
 }) {
   return (
     <div className="flex gap-2.5">
@@ -893,14 +967,16 @@ function InsightCard({
         {desc ? (
           <p className="mt-0.5 text-xs leading-snug text-ink-soft">{desc}</p>
         ) : null}
-        <button
-          type="button"
-          className="mt-1.5 inline-flex items-center gap-0.5 font-mono text-[10.5px] text-brand hover:underline"
-          onClick={() => onEvidence(segId, quote)}
-        >
-          <ArrowUpRight className="size-3" />
-          {segId}
-        </button>
+        {evidence ? (
+          <button
+            type="button"
+            className="mt-1.5 inline-flex items-center gap-0.5 font-mono text-[10.5px] text-brand hover:underline"
+            onClick={() => onEvidence(evidence.segmentId)}
+          >
+            <ArrowUpRight className="size-3" />
+            Play receipt
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -917,26 +993,28 @@ function ExportMenu({
   fileBase,
   callLabel,
   segments,
-  pending,
+  insights,
+  stage,
 }: {
   format: ExportFormat;
   fileBase: string;
   callLabel: string;
   segments: TranscriptSegment[];
-  pending: boolean;
+  insights: CallInsights | null;
+  stage: string;
 }) {
   function exportScope(scope: ExportScope) {
     if (format === "json") {
       downloadText(
         `${fileBase}.json`,
-        JSON.stringify(toExportJson(scope, segments, pending), null, 2),
+        JSON.stringify(toExportJson(scope, segments, insights, stage), null, 2),
         "application/json"
       );
       return;
     }
     downloadText(
       `${fileBase}.md`,
-      toExportMarkdown(callLabel, scope, segments, pending),
+      toExportMarkdown(callLabel, scope, segments, insights, stage),
       "text/markdown;charset=utf-8"
     );
   }
@@ -963,65 +1041,6 @@ function ExportMenu({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function EvidenceModal({
-  evidence,
-  onClose,
-  onJump,
-}: {
-  evidence: Evidence | null;
-  onClose: () => void;
-  onJump: () => void;
-}) {
-  return (
-    <Dialog
-      open={Boolean(evidence)}
-      onOpenChange={(open) => !open && onClose()}
-    >
-      <DialogContent className="sm:max-w-[360px]">
-        <span
-          aria-hidden
-          className="pointer-events-none absolute top-3 left-3 size-2.5 border-t border-l border-muted-foreground/45"
-        />
-        <span
-          aria-hidden
-          className="pointer-events-none absolute right-3 bottom-3 size-2.5 border-r border-b border-muted-foreground/45"
-        />
-        <DialogHeader>
-          <DialogTitle className="font-mono text-[10.5px] font-normal tracking-[0.1em] text-muted-foreground uppercase">
-            Evidence
-          </DialogTitle>
-          <DialogDescription className="sr-only">
-            {evidence
-              ? `${evidence.speaker} at ${evidence.time}: ${evidence.quote}`
-              : "Transcript evidence"}
-          </DialogDescription>
-        </DialogHeader>
-        {evidence ? (
-          <div>
-            <div className="mb-2.5 flex justify-between font-mono text-xs text-ink-soft">
-              <span>{evidence.speaker}</span>
-              <span>{evidence.time}</span>
-            </div>
-            <p className="mb-1.5 text-[14.5px] leading-relaxed font-semibold">
-              {evidence.quote}
-            </p>
-            <p className="mb-4 font-mono text-[10.5px] text-muted-foreground">
-              {evidence.segId}
-            </p>
-            <Button
-              type="button"
-              className="w-full bg-brand text-white hover:bg-brand-hover"
-              onClick={onJump}
-            >
-              Jump to transcript
-            </Button>
-          </div>
-        ) : null}
-      </DialogContent>
-    </Dialog>
   );
 }
 

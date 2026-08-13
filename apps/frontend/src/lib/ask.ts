@@ -1,10 +1,10 @@
 import type { AskMessage, CallRecord, Deal, Rep } from "@/types/domain";
 
 export const ASK_SUGGESTIONS = [
-  "Which reps have deals at risk right now?",
-  "How is Sarah trending this month?",
-  "What's the riskiest deal on the team?",
-  "Summarize Melissa's Northwind call",
+  "What's blocking Acme?",
+  "What's the latest on Northwind?",
+  "Which deal needs a follow-up?",
+  "Summarize the Brightline call",
 ];
 
 export function answerAskQuestion(
@@ -28,15 +28,15 @@ export function answerAskQuestion(
     const dealCalls = Object.keys(calls).filter((k) => calls[k]!.dealId === dealId);
     if (dealCalls.length === 0) {
       return {
-        text: `No calls have been mapped to **${deals[dealId]!.name}** yet — map an incoming call to it from the Calls view.`,
+        text: `No calls on **${deals[dealId]!.name}** yet — open the deal and add a recording.`,
       };
     }
     const latest = dealCalls[dealCalls.length - 1]!;
     return {
       text:
         dealCalls.length === 1
-          ? `Here's the call mapped to **${deals[dealId]!.name}**:`
-          : `${deals[dealId]!.name} has ${dealCalls.length} calls mapped. Most recent:`,
+          ? `Here's the call on **${deals[dealId]!.name}**:`
+          : `${deals[dealId]!.name} has ${dealCalls.length} calls. Most recent:`,
       inlineCard: { type: "deal", key: latest },
     };
   }

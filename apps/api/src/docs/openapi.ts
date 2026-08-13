@@ -195,6 +195,87 @@ export const openApiSpec = {
           updated_at: { type: "string", format: "date-time" },
         },
       },
+      InsightEvidence: {
+        type: "object",
+        properties: {
+          segmentId: { type: "string" },
+          quote: { type: "string" },
+        },
+      },
+      CallInsights: {
+        type: "object",
+        nullable: true,
+        properties: {
+          summary: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                text: { type: "string" },
+                evidence: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/InsightEvidence" },
+                },
+              },
+            },
+          },
+          objections: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                text: { type: "string" },
+                evidence: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/InsightEvidence" },
+                },
+              },
+            },
+          },
+          customer_wants: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string" },
+                confidence: { type: "string", enum: ["high", "medium", "low"] },
+                evidence: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/InsightEvidence" },
+                },
+              },
+            },
+          },
+          next_steps: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                text: { type: "string" },
+                owner: { type: "string" },
+                evidence: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/InsightEvidence" },
+                },
+              },
+            },
+          },
+          follow_up_email: {
+            type: "object",
+            nullable: true,
+            properties: {
+              subject: { type: "string" },
+              body: { type: "string" },
+              evidence: {
+                type: "array",
+                items: { $ref: "#/components/schemas/InsightEvidence" },
+              },
+            },
+          },
+        },
+      },
       InferredSpeaker: {
         type: "object",
         required: ["label", "suggestedName", "confidence", "evidence"],
@@ -722,7 +803,7 @@ export const openApiSpec = {
         responses: {
           "200": {
             description:
-              "Call and its transcription rows. Segments come from `transcriptions` until speaker-name inference finishes. When a transcription's status is LLM_SUCCESS, `segments` are served from `call_transcripts` (named speakers) for that transcription_id.",
+              "Call, transcription rows, and deal notes when they exist. Segments come from `transcriptions` until speaker-name inference finishes. When a transcription's status is LLM_SUCCESS, `segments` are served from `call_transcripts` (named speakers) for that transcription_id. `insights` is the `call_insights` row for the latest transcription, or null until notes are written.",
             content: {
               "application/json": {
                 schema: {
@@ -733,6 +814,7 @@ export const openApiSpec = {
                       type: "array",
                       items: { $ref: "#/components/schemas/Transcription" },
                     },
+                    insights: { $ref: "#/components/schemas/CallInsights" },
                   },
                 },
               },

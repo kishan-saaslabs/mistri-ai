@@ -58,7 +58,7 @@ export function RegisterPage() {
   return (
     <AuthLayout
       title="Create your account"
-      subtitle="Start turning calls into pipeline intelligence."
+      subtitle="Start with a deal. Add calls. Get notes with receipts."
       footer={
         <>
           Already have an account?{" "}

@@ -83,7 +83,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
         return filter;
       });
-      void navigate("/calls");
+      void navigate("/deals");
     },
     [navigate],
   );
@@ -162,7 +162,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const id = `upload_${uploadCounter + 1}`;
       setUploadCounter((n) => n + 1);
       setProcessing((prev) => [...prev, { id, label: input.label, rep: input.rep, sub: "Transcribing…", dealId: input.dealId }]);
-      void navigate("/calls");
+      void navigate(input.dealId ? `/deals/${input.dealId}` : "/deals");
       window.setTimeout(() => {
         const templateKey = TEMPLATES[Math.floor(Math.random() * TEMPLATES.length)]!;
         const template = SEED_CALLS[templateKey]!;

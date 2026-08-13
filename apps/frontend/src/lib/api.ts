@@ -59,6 +59,25 @@ export function isFailedStatus(status: CallStatus) {
   return status === "PYAI_FAILED" || status === "LLM_FAILED";
 }
 
+export function callStageLabel(status: CallStatus) {
+  switch (status) {
+    case "PROCESSING":
+      return "Queued";
+    case "PYAI_TRANSCRIBING":
+      return "Transcribing";
+    case "PYAI_SUCCESS":
+      return "Transcript ready";
+    case "PYAI_FAILED":
+      return "Transcription failed";
+    case "LLM_TRANSCRIBING":
+      return "Writing notes";
+    case "LLM_SUCCESS":
+      return "Notes ready";
+    case "LLM_FAILED":
+      return "Notes failed";
+  }
+}
+
 export type Call = {
   id: string;
   organization_id: string;
@@ -98,10 +117,46 @@ export type Transcription = {
   updated_at: string;
 };
 
+export type InsightEvidence = {
+  segmentId: string;
+  quote: string;
+};
+
+export type CallInsights = {
+  summary: { title: string; text: string; evidence: InsightEvidence[] }[];
+  objections: { title: string; text: string; evidence: InsightEvidence[] }[];
+  customer_wants: {
+    label: string;
+    confidence: "high" | "medium" | "low";
+    evidence: InsightEvidence[];
+  }[];
+  next_steps: {
+    text: string;
+    owner: string;
+    evidence: InsightEvidence[];
+  }[];
+  follow_up_email: {
+    subject: string;
+    body: string;
+    evidence: InsightEvidence[];
+  } | null;
+};
+
 export type CallDetail = {
   call: Call;
   transcriptions: Transcription[];
+  insights: CallInsights | null;
 };
+
+export function isPipelinePending(detail: CallDetail) {
+  if (isPendingStatus(detail.call.status)) return true;
+  const latest = detail.transcriptions[0];
+  if (!latest) return detail.call.status === "PYAI_SUCCESS";
+  if (isPendingStatus(latest.status) || latest.status === "PYAI_SUCCESS") {
+    return true;
+  }
+  return latest.status === "LLM_SUCCESS" && detail.insights == null;
+}
 
 export type CreateOrgUserInput = {
   email: string;

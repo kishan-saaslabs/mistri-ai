@@ -59,8 +59,7 @@ export function AskView() {
               </div>
               <h2 className="mb-1.5 text-[17px] font-semibold">Ask Mistri</h2>
               <p className="mb-[22px] text-[13px] text-muted-foreground">
-                Ask about a deal or a rep — the answer renders right here, with the deal health, evidence, and next step,
-                not just a summary.
+                Ask about a deal — the answer should cite the call, not just summarize it.
               </p>
               <div className="flex flex-wrap justify-center gap-2">
                 {ASK_SUGGESTIONS.map((item) => (
@@ -101,7 +100,7 @@ export function AskView() {
                     reps={reps}
                     onOpenCall={(id) => {
                       selectCall(id);
-                      void navigate("/calls");
+                      void navigate(`/calls/${id}`);
                     }}
                     onEvidence={openEvidence}
                   />

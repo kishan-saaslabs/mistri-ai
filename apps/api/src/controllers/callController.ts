@@ -64,6 +64,7 @@ export const CallController = {
     res.json({
       call: toPublicCall(result.call, publicApiBase(req)),
       transcriptions: result.transcriptions,
+      insights: result.insights,
     });
   }),
 

@@ -88,7 +88,7 @@ export function AddCallDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[420px]">
         <DialogHeader>
-          <DialogTitle>Add a call</DialogTitle>
+          <DialogTitle>Add a call to this deal</DialogTitle>
         </DialogHeader>
 
         <Tabs
@@ -126,7 +126,7 @@ export function AddCallDialog({
                   <ArrowUp className="size-3.5" />
                 </div>
                 <div className="text-[12.5px] text-muted-foreground">
-                  Drop an MP3, WAV, M4A, or MP4 here, or{" "}
+                  Drop an MP3, WAV, M4A, or MP4 on this deal, or{" "}
                   <span className="text-brand underline">browse</span>
                 </div>
                 {file ? (

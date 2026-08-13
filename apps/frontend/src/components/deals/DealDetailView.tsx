@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useOutletContext, useParams } from "react-router-dom";
+import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Plus, UserPlus } from "lucide-react";
 import { toast } from "sonner";
@@ -18,11 +18,15 @@ import { formatDuration } from "@/lib/format";
 import {
   ApiError,
   callsApi,
+  callStageLabel,
   dealsApi,
+  isFailedStatus,
   isPendingStatus,
+  isPipelinePending,
   usersApi,
   type AuthUser,
   type Call,
+  type CallDetail,
   type CallStatus,
 } from "@/lib/api";
 import { formatDate, initialsOf, roleLabel } from "@/lib/display";
@@ -34,33 +38,38 @@ const POLL_MS = 5_000;
 
 const STATUS_STYLES: Record<
   CallStatus,
-  { dot: string; label: string; row?: string; text?: string }
+  { dot: string; row?: string; text?: string }
 > = {
   PROCESSING: {
     dot: "animate-pulse bg-warning",
-    label: "Processing",
     row: "bg-warning-tint/70",
     text: "text-warning",
   },
   PYAI_TRANSCRIBING: {
     dot: "animate-pulse bg-warning",
-    label: "Transcribing",
     row: "bg-warning-tint/70",
     text: "text-warning",
   },
-  PYAI_SUCCESS: { dot: "bg-success", label: "Ready" },
-  PYAI_FAILED: { dot: "bg-danger", label: "Failed" },
-  LLM_TRANSCRIBING: {
+  PYAI_SUCCESS: {
     dot: "animate-pulse bg-warning",
-    label: "Analyzing",
     row: "bg-warning-tint/40",
     text: "text-warning",
   },
-  LLM_SUCCESS: { dot: "bg-success", label: "Ready" },
-  LLM_FAILED: { dot: "bg-danger", label: "Failed" },
+  PYAI_FAILED: { dot: "bg-danger", text: "text-danger" },
+  LLM_TRANSCRIBING: {
+    dot: "animate-pulse bg-warning",
+    row: "bg-warning-tint/40",
+    text: "text-warning",
+  },
+  LLM_SUCCESS: { dot: "bg-success" },
+  LLM_FAILED: { dot: "bg-danger", text: "text-danger" },
 };
 
-/** Fetch a deal's calls and keep pending ones fresh via polling. */
+function displayStage(call: Call, detail?: CallDetail): CallStatus {
+  return detail?.transcriptions[0]?.status ?? call.status;
+}
+
+/** Fetch a deal's calls and keep in-flight ones fresh via polling. */
 function useDealCalls(dealId: string) {
   const queryClient = useQueryClient();
   const list = useQuery({
@@ -68,33 +77,38 @@ function useDealCalls(dealId: string) {
     queryFn: () => dealsApi.calls(dealId),
     enabled: Boolean(dealId),
   });
-  const pendingIds = (list.data ?? [])
-    .filter((call) => isPendingStatus(call.status))
-    .map((call) => call.id);
+  const rows = list.data ?? [];
   const pending = useQueries({
-    queries: pendingIds.map((id) => ({
-      queryKey: queryKeys.call(id),
-      queryFn: async () => {
-        const detail = await callsApi.get(id);
-        queryClient.setQueryData<Call[]>(
-          queryKeys.dealCalls(dealId),
-          (prev) =>
-            prev?.map((row) =>
-              row.id === detail.call.id ? detail.call : row,
-            ) ?? prev,
-        );
-        return detail;
-      },
-      refetchInterval: POLL_MS,
-    })),
+    queries: rows
+      .filter((call) => !isFailedStatus(call.status))
+      .map((call) => ({
+        queryKey: queryKeys.call(call.id),
+        queryFn: async () => {
+          const detail = await callsApi.get(call.id);
+          queryClient.setQueryData<Call[]>(
+            queryKeys.dealCalls(dealId),
+            (prev) =>
+              prev?.map((row) =>
+                row.id === detail.call.id ? detail.call : row,
+              ) ?? prev,
+          );
+          return detail;
+        },
+        refetchInterval: (q: { state: { data?: CallDetail } }) =>
+          q.state.data && isPipelinePending(q.state.data) ? POLL_MS : false,
+      })),
   });
   const overrides = new Map(
     pending.flatMap((q) => (q.data ? [[q.data.call.id, q.data.call] as const] : [])),
   );
-  const calls = (list.data ?? []).map((call) => overrides.get(call.id) ?? call);
+  const details = new Map(
+    pending.flatMap((q) => (q.data ? [[q.data.call.id, q.data] as const] : [])),
+  );
+  const calls = rows.map((call) => overrides.get(call.id) ?? call);
 
   return {
     calls,
+    details,
     loading: list.isPending,
     error: list.error ? queryErrorMessage(list.error) : null,
     refetch: () => void list.refetch(),
@@ -103,6 +117,7 @@ function useDealCalls(dealId: string) {
 
 export function DealDetailView() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { id = "" } = useParams();
   const {
     deals,
@@ -160,7 +175,11 @@ export function DealDetailView() {
           <h1 className="text-[24px] font-semibold tracking-tight">
             {deal.name}
           </h1>
-          <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+          <p className="mt-0.5 text-[13px] text-muted-foreground">
+            Add a recording to this deal. Notes land on the call with receipts
+            back to the transcript.
+          </p>
+          <p className="mt-1 font-mono text-[11px] text-muted-foreground">
             Created {formatDate(deal.created_at)}
           </p>
           <div className="mt-2.5 flex gap-7">
@@ -212,6 +231,7 @@ export function DealDetailView() {
         <TabsContent value="calls" className="pt-5">
           <CallsTab
             calls={callsState.calls}
+            details={callsState.details}
             loading={callsState.loading}
             error={callsState.error}
             refetch={callsState.refetch}
@@ -233,6 +253,7 @@ export function DealDetailView() {
             queryKeys.dealCalls(id),
             (prev) => (prev ? [call, ...prev] : [call]),
           );
+          void navigate(`/calls/${call.id}`);
         }}
       />
     </div>
@@ -282,12 +303,14 @@ function TabCount({
 
 function CallsTab({
   calls,
+  details,
   loading,
   error,
   refetch,
   onAddCall,
 }: {
   calls: Call[];
+  details: Map<string, CallDetail>;
   loading: boolean;
   error: string | null;
   refetch: () => void;
@@ -317,9 +340,10 @@ function CallsTab({
   if (calls.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border py-12 text-center">
-        <p className="text-[13.5px] font-medium">No calls in this deal yet</p>
+        <p className="text-[13.5px] font-medium">Drop a recording on this deal</p>
         <p className="mx-auto mt-1 max-w-[42ch] text-[12.5px] text-muted-foreground">
-          Upload a recording or paste a link and it’ll be mapped to this deal.
+          Upload a file or paste a link. Transcript and deal notes show up on
+          the call, with receipts back to the line.
         </p>
         <Button
           type="button"
@@ -338,7 +362,12 @@ function CallsTab({
   return (
     <MorphIn className="overflow-hidden rounded-xl border border-border">
       {calls.map((call, i) => {
-        const status = STATUS_STYLES[call.status];
+        const detail = details.get(call.id);
+        const stage = displayStage(call, detail);
+        const status = STATUS_STYLES[stage];
+        const inFlight = detail
+          ? isPipelinePending(detail)
+          : isPendingStatus(call.status) || call.status === "PYAI_SUCCESS";
         return (
           <Link
             key={call.id}
@@ -346,7 +375,7 @@ function CallsTab({
             className={cn(
               "flex items-center gap-3 px-4 py-3 hover:bg-muted/60",
               i !== calls.length - 1 && "border-b border-border",
-              status.row,
+              inFlight ? status.row : undefined,
             )}
           >
             <span
@@ -359,10 +388,10 @@ function CallsTab({
               <div
                 className={cn(
                   "mt-px font-mono text-[10.5px]",
-                  status.text ?? "text-muted-foreground",
+                  inFlight ? (status.text ?? "text-warning") : (status.text ?? "text-muted-foreground"),
                 )}
               >
-                {status.label} · {formatDuration(call.duration_seconds)} ·{" "}
+                {callStageLabel(stage)} · {formatDuration(call.duration_seconds)} ·{" "}
                 {formatDate(call.created_at)}
               </div>
             </div>
