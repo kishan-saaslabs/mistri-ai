@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Build output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Uploads and local data
+apps/api/uploads/
+*.sqlite
+*.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+
+# Test and cache
+.turbo/
+.cache/
+.eslintcache
+
+# Vite
+apps/frontend/dist/
+
+# Misc
+*.local

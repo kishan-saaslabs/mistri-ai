@@ -1,0 +1,35 @@
+{
+  "name": "mistri-ai",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Open-source conversation intelligence for sales teams — an MIT-licensed Gong alternative.",
+  "license": "MIT",
+  "homepage": "https://github.com/kishan-saaslabs/mistri-ai",
+  "bugs": {
+    "url": "https://github.com/kishan-saaslabs/mistri-ai/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kishan-saaslabs/mistri-ai.git"
+  },
+  "packageManager": "pnpm@10.26.2",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter \"./apps/*\" dev",
+    "dev:api": "pnpm --filter @mistri-ai/api dev",
+    "dev:frontend": "pnpm --filter @mistri-ai/frontend dev",
+    "build": "pnpm -r --filter \"./apps/*\" build",
+    "lint": "pnpm -r --filter \"./apps/*\" lint",
+    "typecheck": "pnpm -r --filter \"./apps/*\" typecheck",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter @mistri-ai/api db:migrate",
+    "db:seed": "pnpm --filter @mistri-ai/api db:seed"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "name": "@mistri-ai/api",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json && cp src/db/schema.sql dist/db/schema.sql",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/seed.ts"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.1",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.1",
+    "multer": "^2.0.2",
+    "pg": "^8.16.3",
+    "zod": "^4.0.17"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/morgan": "^1.9.10",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.2.1",
+    "@types/pg": "^8.15.5",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2"
+  }
+}
