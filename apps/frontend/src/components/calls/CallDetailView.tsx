@@ -10,6 +10,7 @@ import {
   Pause,
   Play,
 } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { MorphIn, SkeletonLine } from "@/components/ui/skeleton";
 import {
@@ -36,6 +37,7 @@ import {
   type Transcription,
 } from "@/lib/api";
 import { queryErrorMessage, queryKeys } from "@/lib/query";
+import { motionTransition, springs } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import type { DealsOutletContext } from "@/components/deals/DealsLayout";
 
@@ -366,6 +368,8 @@ export function CallDetailView() {
   );
   const speakerKeys = useMemo(() => uniqueSpeakerKeys(segments), [segments]);
   const activeId = activePlayId ?? highlightId;
+  const listRef = useRef<HTMLDivElement>(null);
+  const reduce = useReducedMotion();
 
   useEffect(() => {
     setActivePlayId(null);
@@ -375,10 +379,18 @@ export function CallDetailView() {
 
   useEffect(() => {
     if (!activePlayId) return;
-    document
-      .getElementById(`row-${activePlayId}`)
-      ?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [activePlayId]);
+    const row = document.getElementById(`row-${activePlayId}`);
+    const list = listRef.current;
+    if (!row || !list) return;
+    const rowRect = row.getBoundingClientRect();
+    const listRect = list.getBoundingClientRect();
+    if (rowRect.top < listRect.top || rowRect.bottom > listRect.bottom) {
+      row.scrollIntoView({
+        block: "nearest",
+        behavior: reduce ? "instant" : "smooth",
+      });
+    }
+  }, [activePlayId, reduce]);
 
   function requestSeek(at: number, until: number | null = null) {
     setSeek((prev) => ({ at, until, n: (prev?.n ?? 0) + 1 }));
@@ -516,7 +528,7 @@ export function CallDetailView() {
                 : `${segments.length} line${segments.length === 1 ? "" : "s"}`}
             </span>
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div ref={listRef} className="relative min-h-0 flex-1 overflow-y-auto">
             {pending && segments.length === 0 ? (
               <div className="min-h-[220px]">
                 {Array.from({ length: 6 }, (_, i) => (
@@ -554,15 +566,21 @@ export function CallDetailView() {
                       }
                     }}
                     className={cn(
-                      "grid w-full grid-cols-[48px_1fr] gap-2.5 border-l-2 px-4 py-2.5 text-left",
+                      "relative grid w-full grid-cols-[48px_1fr] gap-2.5 border-l-2 px-4 py-2.5 text-left",
                       tone.border,
-                      activeId === seg.id && "bg-brand-tint",
                     )}
                   >
-                    <div className="pt-0.5 font-mono text-[11px] text-muted-foreground">
+                    {activeId === seg.id ? (
+                      <motion.span
+                        layoutId={`transcript-active-${id}`}
+                        className="absolute inset-0 bg-brand-tint"
+                        transition={motionTransition(reduce, springs.highlight)}
+                      />
+                    ) : null}
+                    <div className="relative z-1 pt-0.5 font-mono text-[11px] text-muted-foreground">
                       {seg.start != null ? formatDuration(seg.start) : "—"}
                     </div>
-                    <div>
+                    <div className="relative z-1">
                       <span
                         className={cn(
                           "mb-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
@@ -1010,10 +1028,18 @@ function TranscriptPlayer({
   const [playing, setPlaying] = useState(false);
   const [cursor, setCursor] = useState(0);
   const [mediaDuration, setMediaDuration] = useState(0);
+  const [playheadSpring, setPlayheadSpring] = useState(false);
+  const reduce = useReducedMotion();
   segmentsRef.current = segments;
 
   const total = mediaDuration || duration || 0;
   const pct = total ? Math.min(100, (cursor / total) * 100) : 0;
+
+  function pulsePlayhead() {
+    if (reduce) return;
+    setPlayheadSpring(true);
+    window.setTimeout(() => setPlayheadSpring(false), 420);
+  }
 
   function emitActive(time: number) {
     const next = segmentAtTime(segmentsRef.current, time)?.id ?? null;
@@ -1042,9 +1068,19 @@ function TranscriptPlayer({
     clipUntil.current = seek.until;
     audio.currentTime = seek.at;
     setCursor(seek.at);
-    emitActive(seek.at);
+    const next = segmentAtTime(segmentsRef.current, seek.at)?.id ?? null;
+    if (next !== lastId.current) {
+      lastId.current = next;
+      onActiveId(next);
+    }
+    if (!reduce) {
+      setPlayheadSpring(true);
+      const id = window.setTimeout(() => setPlayheadSpring(false), 420);
+      void audio.play();
+      return () => window.clearTimeout(id);
+    }
     void audio.play();
-  }, [seek]);
+  }, [seek, onActiveId, reduce]);
 
   function toggle() {
     const audio = audioRef.current;
@@ -1069,6 +1105,7 @@ function TranscriptPlayer({
     if (audio) audio.currentTime = at;
     setCursor(at);
     emitActive(at);
+    pulsePlayhead();
   }
 
   return (
@@ -1108,14 +1145,27 @@ function TranscriptPlayer({
           emitActive(t);
         }}
       />
-      <button
+      <motion.button
         type="button"
         className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border hover:border-brand hover:text-brand"
         onClick={toggle}
         aria-label={playing ? "Pause" : "Play"}
+        whileTap={reduce ? undefined : { scale: 0.94 }}
+        transition={motionTransition(reduce, springs.snappy)}
       >
-        {playing ? <Pause className="size-3" /> : <Play className="size-3" />}
-      </button>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={playing ? "pause" : "play"}
+            className="flex"
+            initial={reduce ? false : { opacity: 0, scale: 0.6 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+            transition={motionTransition(reduce, springs.snappy)}
+          >
+            {playing ? <Pause className="size-3" /> : <Play className="size-3" />}
+          </motion.span>
+        </AnimatePresence>
+      </motion.button>
       <button
         type="button"
         className="relative h-7 flex-1 cursor-pointer"
@@ -1123,9 +1173,14 @@ function TranscriptPlayer({
         aria-label="Seek"
       >
         <span className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-sm bg-border">
-          <span
-            className="absolute inset-y-0 left-0 rounded-sm bg-brand"
-            style={{ width: `${pct}%` }}
+          <motion.span
+            className="absolute inset-y-0 left-0 w-full origin-left rounded-sm bg-brand"
+            animate={{ scaleX: pct / 100 }}
+            transition={
+              playheadSpring
+                ? motionTransition(reduce, springs.snappy)
+                : { duration: 0 }
+            }
           />
         </span>
       </button>

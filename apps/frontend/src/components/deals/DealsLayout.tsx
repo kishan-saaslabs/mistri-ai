@@ -6,9 +6,11 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { Loader2, Plus, Search } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { motionTransition, springs } from "@/lib/motion";
 import {
   Dialog,
   DialogContent,
@@ -108,6 +110,7 @@ function DealList({
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
+  const reduce = useReducedMotion();
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -199,8 +202,11 @@ function DealList({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={creating || !name.trim()}>
-                {creating && <Loader2 className="size-4 animate-spin" />}
+              <Button
+                type="submit"
+                disabled={creating || !name.trim()}
+                pending={creating}
+              >
                 Create deal
               </Button>
             </div>
@@ -226,24 +232,42 @@ function DealList({
           </p>
         ) : (
           <MorphIn>
-            {visible.map((deal) => (
-              <NavLink
-                key={deal.id}
-                to={`/deals/${deal.id}`}
-                className={cn(
-                  "block border-b border-border px-3 py-2.5 hover:bg-muted/50",
-                  selectedDealId === deal.id &&
-                    "border-l-2 border-l-brand bg-brand-tint py-2.5 pr-3 pl-[10px]",
-                )}
-              >
-                <div className="truncate text-[13px] font-medium">
-                  {deal.name}
-                </div>
-                <div className="mt-px font-mono text-[10.5px] text-muted-foreground">
-                  {formatDate(deal.created_at)}
-                </div>
-              </NavLink>
-            ))}
+            <AnimatePresence mode="popLayout" initial={false}>
+              {visible.map((deal) => {
+                const selected = selectedDealId === deal.id;
+                return (
+                  <motion.div
+                    key={deal.id}
+                    layout
+                    initial={reduce ? false : { opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={
+                      reduce ? { opacity: 0 } : { opacity: 0, scale: 0.98 }
+                    }
+                    transition={motionTransition(reduce, springs.smooth)}
+                  >
+                    <NavLink
+                      to={`/deals/${deal.id}`}
+                      className="relative block border-b border-border px-3 py-2.5 hover:bg-muted/50"
+                    >
+                      {selected ? (
+                        <motion.span
+                          layoutId="deal-list-pill"
+                          className="absolute inset-0 border-l-2 border-l-brand bg-brand-tint"
+                          transition={motionTransition(reduce, springs.pill)}
+                        />
+                      ) : null}
+                      <div className="relative z-1 truncate text-[13px] font-medium">
+                        {deal.name}
+                      </div>
+                      <div className="relative z-1 mt-px font-mono text-[10.5px] text-muted-foreground">
+                        {formatDate(deal.created_at)}
+                      </div>
+                    </NavLink>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
           </MorphIn>
         )}
       </div>

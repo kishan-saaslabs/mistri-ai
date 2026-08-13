@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Check, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Check, Eye, EyeOff } from "lucide-react";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -165,8 +165,7 @@ export function RegisterPage() {
           </p>
         </div>
 
-        <Button type="submit" size="lg" disabled={!canSubmit} className="w-full">
-          {submitting && <Loader2 className="size-4 animate-spin" />}
+        <Button type="submit" size="lg" disabled={!canSubmit} pending={submitting} className="w-full">
           {submitting ? "Creating account…" : "Create account"}
         </Button>
       </form>
