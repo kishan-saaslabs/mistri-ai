@@ -16,12 +16,21 @@ const BCRYPT_ROUNDS = 12;
 
 export const addOrgUserSchema = z.object({
   email: z.string().trim().email().max(320),
-  password: z.string().min(10).max(200),
+  password: z.string().min(8).max(200),
   name: z.string().trim().min(1).max(120),
   role: z.enum(USER_ROLES).nullish(),
 });
 
 export const UserService = {
+  async listOrganizationUsers(actorId: string) {
+    const actor = await UserModel.findById(actorId);
+    if (!actor || !isUserRole(actor.role) || !actor.organization_id) {
+      throw new HttpError(401, "Authentication required");
+    }
+    const users = await UserModel.listByOrganization(actor.organization_id);
+    return { users: users.map(toPublicUser) };
+  },
+
   async addToOrganization(actorId: string, input: z.infer<typeof addOrgUserSchema>) {
     const actor = await UserModel.findById(actorId);
     if (!actor || !isUserRole(actor.role) || !actor.organization_id) {

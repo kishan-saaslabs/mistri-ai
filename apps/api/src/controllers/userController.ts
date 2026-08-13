@@ -4,6 +4,12 @@ import { addOrgUserSchema, UserService } from "../services/userService.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
 export const UserController = {
+  list: asyncHandler(async (req: Request, res: Response) => {
+    const actor = requireUser(req);
+    const result = await UserService.listOrganizationUsers(actor.id);
+    res.json(result);
+  }),
+
   create: asyncHandler(async (req: Request, res: Response) => {
     const actor = requireUser(req);
     const body = addOrgUserSchema.parse(req.body);

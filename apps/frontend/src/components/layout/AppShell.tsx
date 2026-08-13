@@ -20,7 +20,7 @@ export function AppShell() {
             </main>
           </div>
           <div className="pointer-events-none fixed bottom-3.5 left-3.5 z-30 rounded-md border border-border bg-white px-2.5 py-1 font-mono text-[9.5px] tracking-wider text-muted-foreground uppercase md:left-[244px]">
-            MVP mock — dummy data for demo purposes
+            Ask Mistri uses demo responses
           </div>
         </div>
         <UploadCallDialog />

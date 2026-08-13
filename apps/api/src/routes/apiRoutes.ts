@@ -17,6 +17,7 @@ const addUserLimiter = rateLimit({
 
 apiRouter.use(requireAuth);
 
+apiRouter.get("/users", UserController.list);
 apiRouter.post("/users", addUserLimiter, UserController.create);
 
 apiRouter.get("/deals", DealController.list);

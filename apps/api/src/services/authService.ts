@@ -16,7 +16,7 @@ const BCRYPT_ROUNDS = 12;
 
 export const registerSchema = z.object({
   email: z.string().trim().email().max(320),
-  password: z.string().min(10).max(200),
+  password: z.string().min(8).max(200),
   name: z.string().trim().min(1).max(120),
   org: z.string().trim().min(1).max(120).optional(),
   role: z.enum(USER_ROLES).nullish(),

@@ -76,6 +76,13 @@ export const UserModel = {
     return query<UserRecord>("SELECT * FROM users WHERE id = ANY($1::uuid[])", [ids]);
   },
 
+  listByOrganization(organizationId: string) {
+    return query<UserRecord>(
+      "SELECT * FROM users WHERE organization_id = $1 ORDER BY created_at ASC",
+      [organizationId],
+    );
+  },
+
   create(
     input: {
       email: string;

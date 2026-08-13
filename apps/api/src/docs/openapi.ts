@@ -83,7 +83,7 @@ export const openApiSpec = {
         required: ["email", "password", "name"],
         properties: {
           email: { type: "string", format: "email", maxLength: 320 },
-          password: { type: "string", minLength: 10, maxLength: 200 },
+          password: { type: "string", minLength: 8, maxLength: 200 },
           name: { type: "string", minLength: 1, maxLength: 120 },
           org: {
             type: "string",
@@ -193,7 +193,7 @@ export const openApiSpec = {
           email: { type: "string", format: "email", maxLength: 320 },
           password: {
             type: "string",
-            minLength: 10,
+            minLength: 8,
             maxLength: 200,
             description: "Temporary password to share with the teammate. Not returned in the response.",
           },
@@ -334,6 +334,29 @@ export const openApiSpec = {
       },
     },
     "/api/users": {
+      get: {
+        tags: ["Users"],
+        summary: "List users in the current organization",
+        description:
+          "Returns every user in the caller's organization. Available to any authenticated member — used to populate team lists and deal member pickers.",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": {
+            description: "Organization users",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    users: { type: "array", items: { $ref: "#/components/schemas/User" } },
+                  },
+                },
+              },
+            },
+          },
+          "401": { description: "Authentication required" },
+        },
+      },
       post: {
         tags: ["Users"],
         summary: "Add a user to the current organization",
