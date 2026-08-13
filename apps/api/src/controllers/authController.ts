@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { setAccessTokenCookie } from "../middleware/auth.js";
 import { UserModel, toPublicUser } from "../models/userModel.js";
 import {
   AuthService,
@@ -12,12 +13,14 @@ export const AuthController = {
   register: asyncHandler(async (req: Request, res: Response) => {
     const body = registerSchema.parse(req.body);
     const result = await AuthService.register(body);
+    setAccessTokenCookie(res, result.token);
     res.status(201).json(result);
   }),
 
   login: asyncHandler(async (req: Request, res: Response) => {
     const body = loginSchema.parse(req.body);
     const result = await AuthService.login(body);
+    setAccessTokenCookie(res, result.token);
     res.json(result);
   }),
 

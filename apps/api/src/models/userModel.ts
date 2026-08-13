@@ -13,6 +13,20 @@ export function canSeeAllDeals(role: UserRole): boolean {
   return role === "OWNER" || role === "ADMIN";
 }
 
+export function canManageOrgUsers(role: UserRole): boolean {
+  return role === "OWNER" || role === "ADMIN";
+}
+
+export function canAssignRole(actorRole: UserRole, targetRole: UserRole): boolean {
+  if (actorRole === "OWNER") {
+    return true;
+  }
+  if (actorRole === "ADMIN") {
+    return targetRole !== "OWNER";
+  }
+  return false;
+}
+
 export type UserRecord = {
   id: string;
   email: string;

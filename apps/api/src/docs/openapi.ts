@@ -11,17 +11,23 @@ export const openApiSpec = {
   tags: [
     { name: "Health", description: "Liveness" },
     { name: "Auth", description: "Register, login, and current user" },
+    { name: "Users", description: "Organization members. OWNER and ADMIN can add users." },
     { name: "Deals", description: "Deal records. One deal can have many calls." },
     { name: "Calls", description: "Call recordings and deal mapping" },
     { name: "Transcriptions", description: "PyAI Hear Telephony batch jobs with diarized speaker segments" },
   ],
   components: {
     securitySchemes: {
-      bearerAuth: {
-        type: "http",
-        scheme: "bearer",
-        bearerFormat: "JWT",
-      },
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+        },
+        cookieAuth: {
+          type: "apiKey",
+          in: "cookie",
+          name: "access_token",
+        },
     },
     parameters: {
       UuidId: {
@@ -65,7 +71,11 @@ export const openApiSpec = {
         type: "object",
         properties: {
           user: { $ref: "#/components/schemas/User" },
-          token: { type: "string", description: "JWT access token (sub, email, role, organization_id). Send as Authorization: Bearer <token>." },
+          token: {
+            type: "string",
+            description:
+              "JWT access token (sub, email, role, organization_id). Also set as an HttpOnly cookie named access_token. Send as Authorization: Bearer <token>, or rely on the cookie with credentials.",
+          },
         },
       },
       RegisterRequest: {
@@ -176,6 +186,25 @@ export const openApiSpec = {
           dealId: { type: "string", format: "uuid", nullable: true, description: "Set null to unassign" },
         },
       },
+      AddOrgUserRequest: {
+        type: "object",
+        required: ["email", "password", "name"],
+        properties: {
+          email: { type: "string", format: "email", maxLength: 320 },
+          password: {
+            type: "string",
+            minLength: 10,
+            maxLength: 200,
+            description: "Temporary password to share with the teammate. Not returned in the response.",
+          },
+          name: { type: "string", minLength: 1, maxLength: 120 },
+          role: {
+            type: "string",
+            enum: ["OWNER", "ADMIN", "TEAM_MEMBER"],
+            description: "Optional. Defaults to TEAM_MEMBER. ADMIN cannot create OWNER.",
+          },
+        },
+      },
       AddDealUserRequest: {
         type: "object",
         required: ["userId"],
@@ -217,7 +246,13 @@ export const openApiSpec = {
         },
         responses: {
           "201": {
-            description: "Account created",
+            description: "Account created. Sets an HttpOnly `access_token` cookie in addition to the JSON token.",
+            headers: {
+              "Set-Cookie": {
+                schema: { type: "string" },
+                description: "HttpOnly cookie named access_token",
+              },
+            },
             content: { "application/json": { schema: { $ref: "#/components/schemas/AuthResponse" } } },
           },
           "400": { description: "Validation failed", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
@@ -237,7 +272,13 @@ export const openApiSpec = {
         },
         responses: {
           "200": {
-            description: "Authenticated",
+            description: "Authenticated. Sets an HttpOnly `access_token` cookie in addition to the JSON token.",
+            headers: {
+              "Set-Cookie": {
+                schema: { type: "string" },
+                description: "HttpOnly cookie named access_token",
+              },
+            },
             content: { "application/json": { schema: { $ref: "#/components/schemas/AuthResponse" } } },
           },
           "401": { description: "Invalid email or password", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
@@ -263,6 +304,37 @@ export const openApiSpec = {
             },
           },
           "401": { description: "Missing or invalid token", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+        },
+      },
+    },
+    "/api/users": {
+      post: {
+        tags: ["Users"],
+        summary: "Add a user to the current organization",
+        description:
+          "OWNER and ADMIN only. Creates a login in the caller's organization. Set email and password in the body, then share those credentials with the teammate. The password is hashed and is not returned.",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/AddOrgUserRequest" } } },
+        },
+        responses: {
+          "201": {
+            description: "User created in the organization",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { user: { $ref: "#/components/schemas/User" } },
+                },
+              },
+            },
+          },
+          "400": { description: "Validation failed", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+          "401": { description: "Authentication required" },
+          "403": { description: "Caller is not OWNER/ADMIN, or ADMIN tried to create OWNER" },
+          "409": { description: "Email already exists" },
+          "429": { description: "Too many attempts" },
         },
       },
     },

@@ -1,11 +1,23 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { CallController, DealController } from "../controllers/callController.js";
+import { UserController } from "../controllers/userController.js";
 import { requireAuth } from "../middleware/auth.js";
 import { callUpload } from "../middleware/upload.js";
 
 export const apiRouter = Router();
 
+const addUserLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many attempts. Try again later." },
+});
+
 apiRouter.use(requireAuth);
+
+apiRouter.post("/users", addUserLimiter, UserController.create);
 
 apiRouter.get("/deals", DealController.list);
 apiRouter.post("/deals", DealController.create);
