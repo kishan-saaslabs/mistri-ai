@@ -1,4 +1,3 @@
-import { ThemeProvider } from "next-themes";
 import { Outlet } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -9,21 +8,19 @@ import { UploadCallDialog } from "@/components/calls/UploadCallDialog";
 
 export function AppShell() {
   return (
-    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
-      <TooltipProvider>
-        <div className="flex h-svh overflow-hidden bg-background">
-          <Sidebar />
-          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <AskBar />
-            <main className="min-h-0 flex-1 overflow-hidden">
-              <Outlet />
-            </main>
-          </div>
+    <TooltipProvider>
+      <div className="flex h-svh overflow-hidden bg-background">
+        <Sidebar />
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <AskBar />
+          <main className="min-h-0 flex-1 overflow-hidden">
+            <Outlet />
+          </main>
         </div>
-        <UploadCallDialog />
-        <EvidenceDialog />
-        <Toaster />
-      </TooltipProvider>
-    </ThemeProvider>
+      </div>
+      <UploadCallDialog />
+      <EvidenceDialog />
+      <Toaster />
+    </TooltipProvider>
   );
 }

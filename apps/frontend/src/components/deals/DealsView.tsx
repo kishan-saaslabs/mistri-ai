@@ -118,7 +118,7 @@ export function DealsView() {
   if (deals.length === 0) {
     return (
       <div className="mx-auto w-full max-w-[760px] px-7 pt-[60px] pb-[60px] text-center">
-        <div className="mx-auto mb-[18px] flex size-[46px] items-center justify-center rounded-[10px] bg-foreground text-base font-bold text-white">
+        <div className="mx-auto mb-[18px] flex size-[46px] items-center justify-center rounded-[10px] bg-foreground text-base font-bold text-background">
           M
         </div>
         <h1 className="mb-2 text-xl font-semibold">Welcome to Mistri AI</h1>

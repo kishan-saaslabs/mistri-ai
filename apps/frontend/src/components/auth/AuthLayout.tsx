@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 
 export function AuthLayout({
   title,
@@ -12,10 +13,11 @@ export function AuthLayout({
   footer: ReactNode;
 }) {
   return (
-    <div className="flex min-h-svh flex-col bg-background">
+    <div className="relative flex min-h-svh flex-col bg-background">
+      <ThemeToggle className="absolute top-4 right-4 size-8" />
       <div className="flex flex-1 items-center justify-center px-6 py-12">
         <div className="w-full max-w-[380px] text-center">
-          <div className="mx-auto mb-[18px] flex size-[46px] items-center justify-center rounded-[10px] bg-foreground text-base font-bold text-white">
+          <div className="mx-auto mb-[18px] flex size-[46px] items-center justify-center rounded-[10px] bg-foreground text-base font-bold text-background">
             M
           </div>
           <h1 className="mb-2 text-xl font-semibold">{title}</h1>

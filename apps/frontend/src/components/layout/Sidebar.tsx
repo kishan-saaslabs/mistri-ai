@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/state/auth";
 
@@ -52,9 +53,9 @@ export function Sidebar() {
     : "";
 
   return (
-    <aside className="hidden h-full w-[232px] shrink-0 flex-col border-r border-[#eaeaea] bg-sidebar px-3 py-4 text-ink-soft md:flex">
+    <aside className="hidden h-full w-[232px] shrink-0 flex-col border-r border-border bg-sidebar px-3 py-4 text-ink-soft md:flex">
       <div className="mb-5 flex items-center gap-2.5 px-2 pt-1">
-        <div className="flex size-[26px] shrink-0 items-center justify-center rounded-md bg-foreground text-[12.5px] font-bold text-white">
+        <div className="flex size-[26px] shrink-0 items-center justify-center rounded-md bg-foreground text-[12.5px] font-bold text-background">
           M
         </div>
         <div className="text-[14.5px] font-semibold tracking-tight text-foreground">Mistri AI</div>
@@ -68,7 +69,7 @@ export function Sidebar() {
             className={({ isActive }) =>
               cn(
                 "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] text-ink-soft",
-                isActive && "bg-[#f0f0f0] font-semibold text-foreground",
+                isActive && "bg-muted font-semibold text-foreground",
                 !isActive && "hover:bg-muted hover:text-foreground",
               )
             }
@@ -79,7 +80,7 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="mt-auto flex items-center gap-2 border-t border-[#eaeaea] px-2.5 pt-2.5">
+      <div className="mt-auto flex items-center gap-1 border-t border-border px-2.5 pt-2.5">
         <div className="flex min-w-0 flex-1 items-center gap-2.5 text-[12.5px] text-ink-soft">
           <div className="flex size-6 shrink-0 items-center justify-center rounded-[5px] border border-border bg-muted font-mono text-[10px]">
             {user ? initialsOf(user.name) : "?"}
@@ -91,6 +92,7 @@ export function Sidebar() {
             </div>
           </div>
         </div>
+        <ThemeToggle />
         <button
           type="button"
           onClick={() => setConfirmOpen(true)}
