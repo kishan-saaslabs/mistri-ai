@@ -137,7 +137,7 @@ export const CallController = {
     if (!transcription) {
       throw new HttpError(400, "Call has no transcription to infer speakers from");
     }
-    if (transcription.status !== "ready") {
+    if (transcription.status !== "PYAI_SUCCESS") {
       throw new HttpError(409, "Transcription is not ready yet");
     }
 

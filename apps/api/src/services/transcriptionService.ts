@@ -13,6 +13,7 @@ import { uploadRoot } from "../middleware/upload.js";
 import { CallModel } from "../models/callModel.js";
 import { CallTranscriptModel } from "../models/callTranscriptModel.js";
 import { TranscriptionModel, type TranscriptionRecord } from "../models/transcriptionModel.js";
+import { publishInferAndRenameJob } from "../queue/inferAndRenameQueue.js";
 import { transcribeAudioFile } from "./pyaiHear.js";
 
 export type InferAndRenameResult = {
@@ -73,9 +74,20 @@ export const TranscriptionService = {
         fullText: result.fullText,
         segments: result.segments,
       });
+      if (!saved) {
+        throw new Error("Could not save transcription");
+      }
 
       const duration = result.durationSeconds != null ? Math.round(result.durationSeconds) : undefined;
       await CallModel.updateStatus(callId, "PYAI_SUCCESS", duration);
+
+      try {
+        await publishInferAndRenameJob({ callId, transcriptionId: saved.id });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Queue publish failed";
+        console.error("Could not enqueue infer-and-rename:", message);
+      }
+
       return saved;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Transcription failed";
