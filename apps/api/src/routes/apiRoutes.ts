@@ -10,6 +10,8 @@ apiRouter.use(requireAuth);
 apiRouter.get("/deals", DealController.list);
 apiRouter.post("/deals", DealController.create);
 apiRouter.get("/deals/:id/calls", DealController.listCalls);
+apiRouter.get("/deals/:id/users", DealController.listUsers);
+apiRouter.post("/deals/:id/users", DealController.addUser);
 
 apiRouter.get("/calls", CallController.list);
 apiRouter.post("/calls/upload", callUpload.single("file"), CallController.upload);

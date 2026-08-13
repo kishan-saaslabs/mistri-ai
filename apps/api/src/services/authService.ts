@@ -1,7 +1,13 @@
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { signAccessToken } from "../middleware/auth.js";
-import { toPublicUser, UserModel } from "../models/userModel.js";
+import {
+  DEFAULT_USER_ROLE,
+  isUserRole,
+  toPublicUser,
+  USER_ROLES,
+  UserModel,
+} from "../models/userModel.js";
 import { HttpError } from "../utils/httpError.js";
 
 const BCRYPT_ROUNDS = 12;
@@ -11,6 +17,7 @@ export const registerSchema = z.object({
   password: z.string().min(10).max(200),
   name: z.string().trim().min(1).max(120),
   org: z.string().trim().max(120).optional(),
+  role: z.enum(USER_ROLES).nullish(),
 });
 
 export const loginSchema = z.object({
@@ -31,16 +38,21 @@ export const AuthService = {
       passwordHash,
       name: input.name,
       org: input.org,
+      role: input.role ?? DEFAULT_USER_ROLE,
     });
 
-    if (!user) {
+    if (!user || !isUserRole(user.role)) {
       throw new HttpError(500, "Could not create user", false);
     }
 
     const publicUser = toPublicUser(user);
     return {
       user: publicUser,
-      token: signAccessToken({ id: publicUser.id, email: publicUser.email }),
+      token: signAccessToken({
+        id: publicUser.id,
+        email: publicUser.email,
+        role: publicUser.role,
+      }),
     };
   },
 
@@ -55,10 +67,18 @@ export const AuthService = {
       throw new HttpError(401, "Invalid email or password");
     }
 
+    if (!isUserRole(user.role)) {
+      throw new HttpError(500, "Could not sign in", false);
+    }
+
     const publicUser = toPublicUser(user);
     return {
       user: publicUser,
-      token: signAccessToken({ id: publicUser.id, email: publicUser.email }),
+      token: signAccessToken({
+        id: publicUser.id,
+        email: publicUser.email,
+        role: publicUser.role,
+      }),
     };
   },
 };

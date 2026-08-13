@@ -37,14 +37,15 @@ try {
 
     if (existing.rowCount && existing.rowCount > 0) {
       demoUserId = existing.rows[0]!.id;
+      await client.query(`UPDATE users SET role = 'OWNER' WHERE id = $1`, [demoUserId]);
       continue;
     }
 
     const inserted = await client.query<{ id: string }>(
-      `INSERT INTO users (email, password_hash, name, org)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO users (email, password_hash, name, org, role)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING id`,
-      [user.email, passwordHash, user.name, user.org],
+      [user.email, passwordHash, user.name, user.org, "OWNER"],
     );
     demoUserId = inserted.rows[0]!.id;
   }
@@ -56,6 +57,15 @@ try {
     }
 
     await client.query(`INSERT INTO deals (name, created_by) VALUES ($1, $2)`, [name, demoUserId]);
+  }
+
+  if (demoUserId) {
+    await client.query(
+      `INSERT INTO user_deals (user_id, deal_id)
+       SELECT $1, id FROM deals WHERE name = ANY($2::text[])
+       ON CONFLICT (user_id, deal_id) DO NOTHING`,
+      [demoUserId, dealNames],
+    );
   }
 
   await client.query("COMMIT");

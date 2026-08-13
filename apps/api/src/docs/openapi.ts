@@ -56,6 +56,7 @@ export const openApiSpec = {
           email: { type: "string", format: "email" },
           name: { type: "string" },
           org: { type: "string", nullable: true },
+          role: { type: "string", enum: ["OWNER", "ADMIN", "TEAM_MEMBER"] },
           createdAt: { type: "string", format: "date-time" },
         },
       },
@@ -63,7 +64,7 @@ export const openApiSpec = {
         type: "object",
         properties: {
           user: { $ref: "#/components/schemas/User" },
-          token: { type: "string", description: "JWT access token. Send as Authorization: Bearer <token>." },
+          token: { type: "string", description: "JWT access token (sub, email, role). Send as Authorization: Bearer <token>." },
         },
       },
       RegisterRequest: {
@@ -74,6 +75,11 @@ export const openApiSpec = {
           password: { type: "string", minLength: 10, maxLength: 200 },
           name: { type: "string", minLength: 1, maxLength: 120 },
           org: { type: "string", maxLength: 120 },
+          role: {
+            type: "string",
+            enum: ["OWNER", "ADMIN", "TEAM_MEMBER"],
+            description: "Optional. Defaults to OWNER if omitted.",
+          },
         },
       },
       LoginRequest: {
@@ -163,6 +169,13 @@ export const openApiSpec = {
           dealId: { type: "string", format: "uuid", nullable: true, description: "Set null to unassign" },
         },
       },
+      AddDealUserRequest: {
+        type: "object",
+        required: ["userId"],
+        properties: {
+          userId: { type: "string", format: "uuid" },
+        },
+      },
     },
   },
   paths: {
@@ -250,6 +263,8 @@ export const openApiSpec = {
       get: {
         tags: ["Deals"],
         summary: "List deals",
+        description:
+          "OWNER and ADMIN see all deals. TEAM_MEMBER sees only deals they are mapped to in user_deals.",
         security: [{ bearerAuth: [] }],
         responses: {
           "200": {
@@ -271,6 +286,7 @@ export const openApiSpec = {
       post: {
         tags: ["Deals"],
         summary: "Create deal",
+        description: "Creates a deal and maps the current user in user_deals.",
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -313,8 +329,64 @@ export const openApiSpec = {
               },
             },
           },
-          "400": { description: "Deal not found" },
           "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to access this deal" },
+          "404": { description: "Deal not found" },
+        },
+      },
+    },
+    "/api/deals/{id}/users": {
+      get: {
+        tags: ["Deals"],
+        summary: "List users mapped to a deal",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: "#/components/parameters/UuidId" }],
+        responses: {
+          "200": {
+            description: "Deal members",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    users: { type: "array", items: { $ref: "#/components/schemas/User" } },
+                  },
+                },
+              },
+            },
+          },
+          "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to access this deal" },
+          "404": { description: "Deal not found" },
+        },
+      },
+      post: {
+        tags: ["Deals"],
+        summary: "Map a user to a deal",
+        description: "OWNER, ADMIN, or the deal creator can add a member. Duplicate mapping returns 409.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: "#/components/parameters/UuidId" }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/AddDealUserRequest" } } },
+        },
+        responses: {
+          "201": {
+            description: "User mapped to the deal",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { user: { $ref: "#/components/schemas/User" } },
+                },
+              },
+            },
+          },
+          "400": { description: "User not found" },
+          "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to share this deal" },
+          "404": { description: "Deal not found" },
+          "409": { description: "User is already mapped to this deal" },
         },
       },
     },
@@ -322,6 +394,8 @@ export const openApiSpec = {
       get: {
         tags: ["Calls"],
         summary: "List calls",
+        description:
+          "OWNER and ADMIN see all calls. TEAM_MEMBER sees calls on mapped deals plus their own unassigned uploads.",
         security: [{ bearerAuth: [] }],
         responses: {
           "200": {
@@ -381,6 +455,7 @@ export const openApiSpec = {
           },
           "400": { description: "Missing file, unsupported type, or unknown deal" },
           "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to assign this deal" },
           "413": { description: "File too large" },
         },
       },
@@ -408,6 +483,7 @@ export const openApiSpec = {
           },
           "400": { description: "Invalid URL or deal" },
           "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to assign this deal" },
         },
       },
     },
@@ -436,6 +512,7 @@ export const openApiSpec = {
             },
           },
           "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to access this call" },
           "404": { description: "Call not found" },
         },
       },
@@ -462,6 +539,7 @@ export const openApiSpec = {
           },
           "400": { description: "Deal not found" },
           "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to map this call or target deal" },
           "404": { description: "Call not found" },
         },
       },
@@ -490,6 +568,7 @@ export const openApiSpec = {
             },
           },
           "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to access this call" },
           "404": { description: "Call not found" },
         },
       },
@@ -521,6 +600,7 @@ export const openApiSpec = {
           },
           "400": { description: "No uploaded file on this call" },
           "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to access this call" },
           "404": { description: "Call not found" },
         },
       },

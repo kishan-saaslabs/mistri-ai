@@ -29,6 +29,23 @@ export const CallModel = {
     return query<CallRecord>("SELECT * FROM calls ORDER BY created_at DESC");
   },
 
+  listForUser(userId: string) {
+    return query<CallRecord>(
+      `SELECT c.*
+       FROM calls c
+       WHERE (
+         c.deal_id IS NOT NULL AND EXISTS (
+           SELECT 1 FROM user_deals ud
+           WHERE ud.deal_id = c.deal_id AND ud.user_id = $1
+         )
+       ) OR (
+         c.deal_id IS NULL AND c.uploaded_by = $1
+       )
+       ORDER BY c.created_at DESC`,
+      [userId],
+    );
+  },
+
   listByDeal(dealId: string) {
     return query<CallRecord>("SELECT * FROM calls WHERE deal_id = $1 ORDER BY created_at DESC", [dealId]);
   },

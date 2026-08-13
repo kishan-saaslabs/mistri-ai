@@ -8,8 +8,15 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   name          TEXT NOT NULL,
   org           TEXT,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  role          TEXT NOT NULL DEFAULT 'OWNER',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT users_role_check CHECK (role IN ('OWNER', 'ADMIN', 'TEAM_MEMBER'))
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'OWNER';
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check
+  CHECK (role IN ('OWNER', 'ADMIN', 'TEAM_MEMBER'));
 
 
 CREATE TABLE IF NOT EXISTS deals (
@@ -18,6 +25,16 @@ CREATE TABLE IF NOT EXISTS deals (
   created_by UUID REFERENCES users (id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS user_deals (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+  deal_id    UUID NOT NULL REFERENCES deals (id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, deal_id)
+);
+
+CREATE INDEX IF NOT EXISTS user_deals_deal_id_idx ON user_deals (deal_id);
 
 -- One deal can have many calls. deal_id is nullable so a call can be mapped later.
 CREATE TABLE IF NOT EXISTS calls (
