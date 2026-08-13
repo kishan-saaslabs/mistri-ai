@@ -3,6 +3,7 @@ import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { ExpressAdapter } from "@bull-board/express";
 import type { Express } from "express";
 import helmet from "helmet";
+import { callInsightsQueue } from "./callInsightsQueue.js";
 import { inferAndRenameQueue } from "./inferAndRenameQueue.js";
 
 /**
@@ -17,7 +18,7 @@ export function mountBullBoard(app: Express) {
   serverAdapter.setBasePath("/admin/queues");
 
   createBullBoard({
-    queues: [new BullMQAdapter(inferAndRenameQueue)],
+    queues: [new BullMQAdapter(inferAndRenameQueue), new BullMQAdapter(callInsightsQueue)],
     serverAdapter,
   });
 

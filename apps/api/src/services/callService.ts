@@ -203,10 +203,11 @@ function startTranscription(callId: string) {
 
 async function transcriptionsForCall(call: CallRecord) {
   const transcriptions = await TranscriptionService.listForCall(call.id);
-  if (call.status !== "LLM_SUCCESS") {
-    return transcriptions;
-  }
 
+  // Named-transcript availability is tracked per transcription (see
+  // schema.sql / transcriptionService.ts), not on calls.status — a call's
+  // status never reaches an LLM_* value. Just check directly whether any
+  // named rows exist rather than gating on a call-level status field.
   const namedRows = await CallTranscriptModel.listByCallId(call.id);
   if (namedRows.length === 0) {
     return transcriptions;

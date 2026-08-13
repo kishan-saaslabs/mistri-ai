@@ -13,6 +13,7 @@ import { uploadRoot } from "../middleware/upload.js";
 import { CallModel } from "../models/callModel.js";
 import { CallTranscriptModel } from "../models/callTranscriptModel.js";
 import { TranscriptionModel, type TranscriptionRecord } from "../models/transcriptionModel.js";
+import { publishCallInsightsJob } from "../queue/callInsightsQueue.js";
 import { publishInferAndRenameJob } from "../queue/inferAndRenameQueue.js";
 import { transcribeAudioFile } from "./pyaiHear.js";
 
@@ -102,48 +103,88 @@ export const TranscriptionService = {
   },
 
   async inferAndRenameSpeakers(transcription: TranscriptionRecord): Promise<InferAndRenameResult> {
-    const segments = transcription.segments;
-
-    if (segments.length === 0) {
-      const named = applySpeakerNames(segments, {});
+    // Guard: only pick up transcriptions that are actually in PYAI_SUCCESS.
+    // Checked on the transcription itself, not the call — a call can have
+    // multiple transcription rows (retries), each with its own status, so
+    // this is the precise thing to gate on. Blocks a stale/duplicate job
+    // from re-running (or clobbering) LLM work for a transcription that
+    // has moved on (already LLM_SUCCESS, never finished PyAI, or failed)
+    // since the job was published.
+    if (transcription.status !== "PYAI_SUCCESS") {
+      const named = applySpeakerNames(transcription.segments, {});
       return {
         inferred: [],
         transcript: named,
         readable: renderNamedTranscript(named),
-        reason: "transcription has no segments",
+        reason: `transcription status is ${transcription.status}, expected PYAI_SUCCESS — skipping`,
       };
     }
 
-    if (!segments.some((segment) => segment.speaker !== null)) {
-      const named = applySpeakerNames(segments, {});
-      return {
-        inferred: [],
-        transcript: named,
-        readable: renderNamedTranscript(named),
-        reason: "no diarization data available for this transcript",
-      };
+    await TranscriptionModel.markLLMTranscribing(transcription.id);
+
+    try {
+      const segments = transcription.segments;
+
+      if (segments.length === 0) {
+        const named = applySpeakerNames(segments, {});
+        await TranscriptionModel.markLLMSuccess(transcription.id);
+        return {
+          inferred: [],
+          transcript: named,
+          readable: renderNamedTranscript(named),
+          reason: "transcription has no segments",
+        };
+      }
+
+      if (!segments.some((segment) => segment.speaker !== null)) {
+        const named = applySpeakerNames(segments, {});
+        await TranscriptionModel.markLLMSuccess(transcription.id);
+        return {
+          inferred: [],
+          transcript: named,
+          readable: renderNamedTranscript(named),
+          reason: "no diarization data available for this transcript",
+        };
+      }
+
+      const cached = await CallTranscriptModel.findByTranscriptionId(transcription.id);
+      if (cached) {
+        await TranscriptionModel.markLLMSuccess(transcription.id);
+        return {
+          inferred: cached.inferred_speakers,
+          transcript: cached.segments,
+          readable: renderNamedTranscript(cached.segments),
+        };
+      }
+
+      const client = getLLMClient();
+      const inferred = await inferSpeakerNames(segments, client);
+      const named = applySpeakerNames(segments, toSpeakerMap(inferred));
+      const readable = renderNamedTranscript(named);
+      await CallTranscriptModel.upsert({
+        callId: transcription.call_id,
+        transcriptionId: transcription.id,
+        segments: named,
+        inferredSpeakers: inferred,
+      });
+
+      // A fresh named transcript now exists — publish the next pipeline
+      // stage. Not published on the cache-hit / short-circuit paths above:
+      // those don't produce a new call_transcripts row, so there'd be
+      // nothing new for call-insights to read.
+      try {
+        await publishCallInsightsJob({ callId: transcription.call_id, transcriptionId: transcription.id });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Queue publish failed";
+        console.error("Could not enqueue call-insights:", message);
+      }
+
+      await TranscriptionModel.markLLMSuccess(transcription.id);
+      return { inferred, transcript: named, readable };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Speaker inference failed";
+      await TranscriptionModel.markLLMFailed(transcription.id, message);
+      throw error;
     }
-
-    const cached = await CallTranscriptModel.findByTranscriptionId(transcription.id);
-    if (cached) {
-      return {
-        inferred: cached.inferred_speakers,
-        transcript: cached.segments,
-        readable: renderNamedTranscript(cached.segments),
-      };
-    }
-
-    const client = getLLMClient();
-    const inferred = await inferSpeakerNames(segments, client);
-    const named = applySpeakerNames(segments, toSpeakerMap(inferred));
-    const readable = renderNamedTranscript(named);
-    await CallTranscriptModel.upsert({
-      callId: transcription.call_id,
-      transcriptionId: transcription.id,
-      segments: named,
-      inferredSpeakers: inferred,
-    });
-
-    return { inferred, transcript: named, readable };
   },
 };

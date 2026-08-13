@@ -1,14 +1,6 @@
 import { query, queryOne } from "../config/database.js";
 
-export const CALL_STATUSES = [
-  "queued",
-  "PROCESSING",
-  "PYAI_SUCCESS",
-  "PYAI_FAILED",
-  "LLM_TRANSCRIBING",
-  "LLM_SUCCESS",
-  "LLM_FAILED",
-] as const;
+export const CALL_STATUSES = ["queued", "PROCESSING", "PYAI_SUCCESS", "PYAI_FAILED"] as const;
 export type CallStatus = (typeof CALL_STATUSES)[number];
 
 export type CallRecord = {

@@ -134,15 +134,8 @@ export const openApiSpec = {
           duration_seconds: { type: "integer" },
           status: {
             type: "string",
-            enum: [
-              "queued",
-              "PROCESSING",
-              "PYAI_SUCCESS",
-              "PYAI_FAILED",
-              "LLM_TRANSCRIBING",
-              "LLM_SUCCESS",
-              "LLM_FAILED",
-            ],
+            enum: ["queued", "PROCESSING", "PYAI_SUCCESS", "PYAI_FAILED"],
+            description: "PyAI transcription phase only. Speaker-name inference status is tracked per transcription, not here — see Transcription.status.",
           },
           fileUrl: {
             type: "string",
@@ -167,7 +160,7 @@ export const openApiSpec = {
           text: { type: "string" },
           speakerName: {
             type: "string",
-            description: "Present when call.status is LLM_SUCCESS: resolved display name from call_transcripts",
+            description: "Present once speaker-name inference succeeds for this segment's transcription: resolved display name from call_transcripts",
           },
         },
       },
@@ -729,7 +722,7 @@ export const openApiSpec = {
         responses: {
           "200": {
             description:
-              "Call and its transcription rows. When call.status is PYAI_SUCCESS, segments come from transcriptions. When call.status is LLM_SUCCESS, segments come from call_transcripts (named speakers).",
+              "Call and its transcription rows. Segments come from transcriptions by default; once speaker-name inference succeeds for a transcription, its segments are replaced with the named version from call_transcripts (real speaker names instead of speaker_1/speaker_2).",
             content: {
               "application/json": {
                 schema: {
@@ -813,7 +806,7 @@ export const openApiSpec = {
         responses: {
           "200": {
             description:
-              "Transcription rows. Segments come from transcriptions when call.status is PYAI_SUCCESS, and from call_transcripts when call.status is LLM_SUCCESS.",
+              "Transcription rows. Segments come from transcriptions by default, and from call_transcripts (named speakers) once speaker-name inference succeeds for that transcription.",
             content: {
               "application/json": {
                 schema: {

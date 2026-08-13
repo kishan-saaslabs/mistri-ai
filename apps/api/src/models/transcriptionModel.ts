@@ -104,4 +104,34 @@ export const TranscriptionModel = {
       [id, message.slice(0, 1000)]
     );
   },
+
+  markLLMTranscribing(id: string) {
+    return queryOne<TranscriptionRecord>(
+      `UPDATE transcriptions
+       SET status = 'LLM_TRANSCRIBING', updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id],
+    );
+  },
+
+  markLLMSuccess(id: string) {
+    return queryOne<TranscriptionRecord>(
+      `UPDATE transcriptions
+       SET status = 'LLM_SUCCESS', updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id],
+    );
+  },
+
+  markLLMFailed(id: string, message: string) {
+    return queryOne<TranscriptionRecord>(
+      `UPDATE transcriptions
+       SET status = 'LLM_FAILED', error = $2, updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id, message.slice(0, 1000)],
+    );
+  },
 };

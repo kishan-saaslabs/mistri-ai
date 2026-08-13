@@ -95,15 +95,7 @@ CREATE TABLE IF NOT EXISTS calls (
   storage_path      TEXT,
   source_url        TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT calls_status_check CHECK (status IN (
-    'queued',
-    'PROCESSING',
-    'PYAI_SUCCESS',
-    'PYAI_FAILED',
-    'LLM_TRANSCRIBING',
-    'LLM_SUCCESS',
-    'LLM_FAILED'
-  ))
+  CONSTRAINT calls_status_check CHECK (status IN ('queued', 'PROCESSING', 'PYAI_SUCCESS', 'PYAI_FAILED'))
 );
 
 ALTER TABLE calls ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations (id) ON DELETE CASCADE;
@@ -131,19 +123,11 @@ ALTER TABLE calls ALTER COLUMN organization_id SET NOT NULL;
 
 ALTER TABLE calls DROP CONSTRAINT IF EXISTS calls_status_check;
 UPDATE calls SET status = 'PROCESSING' WHERE status IN ('processing', 'PROCESSING');
-UPDATE calls SET status = 'PYAI_SUCCESS' WHERE status IN ('ready', 'PYAI_SUCCESS');
+UPDATE calls SET status = 'PYAI_SUCCESS' WHERE status IN ('ready', 'PYAI_SUCCESS', 'LLM_TRANSCRIBING', 'LLM_SUCCESS', 'LLM_FAILED');
 UPDATE calls SET status = 'PYAI_FAILED' WHERE status IN ('failed', 'PYAI_FAILED');
 ALTER TABLE calls ALTER COLUMN status SET DEFAULT 'PROCESSING';
 ALTER TABLE calls ADD CONSTRAINT calls_status_check
-  CHECK (status IN (
-    'queued',
-    'PROCESSING',
-    'PYAI_SUCCESS',
-    'PYAI_FAILED',
-    'LLM_TRANSCRIBING',
-    'LLM_SUCCESS',
-    'LLM_FAILED'
-  ));
+  CHECK (status IN ('queued', 'PROCESSING', 'PYAI_SUCCESS', 'PYAI_FAILED'));
 
 CREATE INDEX IF NOT EXISTS calls_deal_id_idx ON calls (deal_id);
 CREATE INDEX IF NOT EXISTS calls_created_at_idx ON calls (created_at DESC);
@@ -212,3 +196,24 @@ CREATE TABLE IF NOT EXISTS call_transcripts (
 );
 
 CREATE INDEX IF NOT EXISTS call_transcripts_call_id_idx ON call_transcripts (call_id);
+
+-- LLM-generated call insights (what happened, objections, what the
+-- customer wants, next steps, optional follow-up email draft), generated
+-- from the NAMED transcript in call_transcripts once speaker-name
+-- inference succeeds. Keyed by transcription_id for the same reason as
+-- call_transcripts — a retranscription gets its own insights.
+CREATE TABLE IF NOT EXISTS call_insights (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  call_id           UUID NOT NULL REFERENCES calls (id) ON DELETE CASCADE,
+  transcription_id  UUID NOT NULL REFERENCES transcriptions (id) ON DELETE CASCADE,
+  summary           JSONB NOT NULL,
+  objections        JSONB NOT NULL,
+  customer_wants    JSONB NOT NULL,
+  next_steps        JSONB NOT NULL,
+  follow_up_email   JSONB,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT call_insights_transcription_id_key UNIQUE (transcription_id)
+);
+
+CREATE INDEX IF NOT EXISTS call_insights_call_id_idx ON call_insights (call_id);
