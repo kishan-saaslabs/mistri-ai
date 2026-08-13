@@ -33,3 +33,4 @@ apiRouter.get("/calls/:id", CallController.get);
 apiRouter.patch("/calls/:id", CallController.update);
 apiRouter.get("/calls/:id/transcriptions", CallController.transcriptions);
 apiRouter.post("/calls/:id/transcribe", CallController.retranscribe);
+apiRouter.post("/calls/:id/infer-and-rename", CallController.inferAndRename);

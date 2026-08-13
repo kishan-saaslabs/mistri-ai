@@ -8,6 +8,7 @@ import {
   linkCallSchema,
   updateCallSchema,
 } from "../services/callService.js";
+import { publishInferAndRenameJob } from "../queue/inferAndRenameQueue.js";
 import { TranscriptionService } from "../services/transcriptionService.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { HttpError } from "../utils/httpError.js";
@@ -102,5 +103,21 @@ export const CallController = {
     await TranscriptionService.transcribeCall(result.call.id);
     const refreshed = await CallService.get(actor.id, result.call.id);
     res.json(refreshed);
+  }),
+
+  inferAndRename: asyncHandler(async (req: Request, res: Response) => {
+    const actor = requireUser(req);
+    const result = await CallService.get(actor.id, String(req.params.id));
+    const transcription = result.transcriptions[0];
+
+    if (!transcription) {
+      throw new HttpError(400, "Call has no transcription to infer speakers from");
+    }
+    if (transcription.status !== "ready") {
+      throw new HttpError(409, "Transcription is not ready yet");
+    }
+
+    await publishInferAndRenameJob({ callId: result.call.id, transcriptionId: transcription.id });
+    res.status(202).json({ status: "queued", transcriptionId: transcription.id });
   }),
 };

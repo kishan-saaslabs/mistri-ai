@@ -18,6 +18,7 @@
     "pnpm": ">=10.0.0"
   },
   "scripts": {
+    "postinstall": "pnpm --filter @mistri-ai/ai build",
     "dev": "pnpm -r --parallel --filter \"./apps/*\" dev",
     "dev:api": "pnpm --filter @mistri-ai/api dev",
     "dev:frontend": "pnpm --filter @mistri-ai/frontend dev",
@@ -26,6 +27,7 @@
     "typecheck": "pnpm -r --filter \"./apps/*\" typecheck",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
+    "redis:up": "docker compose up -d redis",
     "db:migrate": "pnpm --filter @mistri-ai/api db:migrate",
     "db:seed": "pnpm --filter @mistri-ai/api db:seed"
   },
