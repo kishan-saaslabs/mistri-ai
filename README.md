@@ -38,6 +38,8 @@ pnpm dev
 
 - Frontend: http://localhost:5173
 - API health: http://localhost:3001/health
+- Swagger UI: http://localhost:3001/docs
+- OpenAPI JSON: http://localhost:3001/openapi.json
 
 The UI ships with demo call data so you can explore Calls, Deals, and Ask Mistri without wiring a live transcription pipeline. Uploads and auth persist through the API once Postgres is running.
 

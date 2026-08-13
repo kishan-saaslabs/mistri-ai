@@ -13,3 +13,6 @@ pnpm db:up
 pnpm db:migrate
 pnpm --filter @mistri-ai/api dev
 ```
+
+Swagger UI: http://localhost:3001/docs  
+OpenAPI JSON: http://localhost:3001/openapi.json

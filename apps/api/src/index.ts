@@ -6,6 +6,7 @@ const app = createApp();
 
 const server = app.listen(env.API_PORT, () => {
   console.log(`API listening on http://localhost:${env.API_PORT}`);
+  console.log(`Swagger UI: http://localhost:${env.API_PORT}/docs`);
 });
 
 async function shutdown() {

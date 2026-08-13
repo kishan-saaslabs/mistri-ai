@@ -22,7 +22,9 @@ function getClient() {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function asNumber(value: unknown): number | null {
@@ -92,10 +94,17 @@ export async function transcribeAudioFile(input: {
     response_format: "verbose_json",
   });
 
+  console.log("PyAI response:", result);
+
   const payload = result as unknown;
   const root = asRecord(payload);
   const segments = normalizeSegments(payload);
-  const fullText = asString(root?.text)?.trim() || segments.map((seg) => seg.text).join(" ").trim();
+  const fullText =
+    asString(root?.text)?.trim() ||
+    segments
+      .map((seg) => seg.text)
+      .join(" ")
+      .trim();
 
   return {
     language: asString(root?.language) ?? "en",
