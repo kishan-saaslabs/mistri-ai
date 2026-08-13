@@ -177,6 +177,12 @@ ALTER TABLE transcriptions ADD CONSTRAINT transcriptions_status_check
 
 CREATE INDEX IF NOT EXISTS transcriptions_call_id_idx ON transcriptions (call_id);
 
+-- Hear job id so an API restart can resume polling instead of submitting again.
+ALTER TABLE transcriptions ADD COLUMN IF NOT EXISTS provider_job_id TEXT;
+CREATE INDEX IF NOT EXISTS transcriptions_in_flight_idx
+  ON transcriptions (status)
+  WHERE status IN ('PROCESSING', 'PYAI_TRANSCRIBING') AND provider_job_id IS NOT NULL;
+
 -- LLM speaker-name inference results for a transcription: the fully
 -- resolved named transcript (segments + speakerName) plus the raw
 -- InferredSpeaker[] suggestions, cached per transcription_id (not call_id

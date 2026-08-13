@@ -201,25 +201,38 @@ function startTranscription(callId: string) {
   });
 }
 
+function toPublicTranscription<T extends { provider_job_id?: string | null }>(row: T) {
+  const { provider_job_id: _jobId, ...rest } = row;
+  return rest;
+}
+
+function namedSegmentList(segments: unknown) {
+  if (Array.isArray(segments)) {
+    return segments;
+  }
+  return [];
+}
+
 async function transcriptionsForCall(call: CallRecord) {
   const transcriptions = await TranscriptionService.listForCall(call.id);
+  const llmIds = transcriptions
+    .filter((row) => row.status === "LLM_SUCCESS")
+    .map((row) => row.id);
 
-  // Named-transcript availability is tracked per transcription (see
-  // schema.sql / transcriptionService.ts), not on calls.status — a call's
-  // status never reaches an LLM_* value. Just check directly whether any
-  // named rows exist rather than gating on a call-level status field.
-  const namedRows = await CallTranscriptModel.listByCallId(call.id);
-  if (namedRows.length === 0) {
-    return transcriptions;
-  }
-
+  const namedRows = await CallTranscriptModel.listByTranscriptionIds(llmIds);
   const byTranscriptionId = new Map(
-    namedRows.map((row) => [row.transcription_id, row]),
+    namedRows.map((row) => [String(row.transcription_id), row]),
   );
+
   return transcriptions.map((row) => {
-    const named = byTranscriptionId.get(row.id);
-    if (!named) return row;
-    return { ...row, segments: named.segments };
+    if (row.status !== "LLM_SUCCESS") {
+      return toPublicTranscription(row);
+    }
+    const named = byTranscriptionId.get(String(row.id));
+    if (!named) {
+      return toPublicTranscription(row);
+    }
+    return toPublicTranscription({ ...row, segments: namedSegmentList(named.segments) });
   });
 }
 

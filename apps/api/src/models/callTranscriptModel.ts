@@ -19,6 +19,16 @@ export const CallTranscriptModel = {
     );
   },
 
+  listByTranscriptionIds(transcriptionIds: string[]) {
+    if (transcriptionIds.length === 0) {
+      return Promise.resolve([] as CallTranscriptRecord[]);
+    }
+    return query<CallTranscriptRecord>(
+      "SELECT * FROM call_transcripts WHERE transcription_id = ANY($1::uuid[])",
+      [transcriptionIds],
+    );
+  },
+
   listByCallId(callId: string) {
     return query<CallTranscriptRecord>(
       "SELECT * FROM call_transcripts WHERE call_id = $1 ORDER BY created_at DESC",

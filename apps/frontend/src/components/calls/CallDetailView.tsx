@@ -114,6 +114,12 @@ function prettySpeaker(raw: string) {
   return raw.replace(/_/g, " ");
 }
 
+function displaySpeaker(seg: TranscriptSegment) {
+  const named = seg.speakerName?.trim();
+  if (named) return named;
+  return prettySpeaker(speakerKey(seg.speaker));
+}
+
 function shortId(id: string) {
   return id.replaceAll("-", "").slice(0, 8);
 }
@@ -126,7 +132,7 @@ function modelLabel(model: string | undefined) {
 function uniqueSpeakerKeys(segments: TranscriptSegment[]) {
   const keys: string[] = [];
   for (const seg of segments) {
-    const key = speakerKey(seg.speaker);
+    const key = displaySpeaker(seg);
     if (!keys.includes(key)) keys.push(key);
   }
   return keys;
@@ -204,7 +210,7 @@ type ExportFormat = "markdown" | "json";
 
 function transcriptLines(segments: TranscriptSegment[]) {
   return segments.map((seg) => ({
-    Speaker: prettySpeaker(speakerKey(seg.speaker)),
+    Speaker: displaySpeaker(seg),
     time: seg.start != null ? formatDuration(seg.start) : "—",
     text: seg.text,
   }));
@@ -422,7 +428,7 @@ export function CallDetailView() {
         : fromTranscript || snippet || "—";
     setEvidence({
       segId,
-      speaker: target ? speakerKey(target.speaker) : "speaker_1",
+      speaker: target ? displaySpeaker(target) : "speaker_1",
       time: target?.start != null ? formatDuration(target.start) : "—",
       quote,
       targetId: target?.id ?? null,
@@ -515,7 +521,7 @@ export function CallDetailView() {
                   toneFor(key, speakerKeys).pill,
                 )}
               >
-                {prettySpeaker(key)}
+                {key}
               </span>
             ))}
           </div>
@@ -579,7 +585,7 @@ export function CallDetailView() {
               </div>
             ) : (
               segments.map((seg) => {
-                const key = speakerKey(seg.speaker);
+                const key = displaySpeaker(seg);
                 const tone = toneFor(key, speakerKeys);
                 return (
                   <button
@@ -606,7 +612,7 @@ export function CallDetailView() {
                           tone.pill,
                         )}
                       >
-                        {prettySpeaker(key)}
+                        {key}
                       </span>
                       <p className="mt-1 text-[13.5px] leading-normal">
                         {seg.text}
@@ -983,6 +989,7 @@ function TranscriptPlayer({
         ref={audioRef}
         src={src}
         preload="metadata"
+        crossOrigin="use-credentials"
         onPlay={() => {
           setPlaying(true);
           emitActive(audioRef.current?.currentTime ?? 0);
