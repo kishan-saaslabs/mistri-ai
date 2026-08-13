@@ -11,7 +11,7 @@ Mistri AI records the shape of a deal from the call itself: transcript, deal hea
 
 ## Quick start
 
-**Requirements:** Node.js 20+, [pnpm](https://pnpm.io/) 10+, Docker (for Postgres).
+**Requirements:** Node.js 20+, [pnpm](https://pnpm.io/) 10+, Docker (for Postgres and Redis).
 
 ```bash
 git clone https://github.com/kishan-saaslabs/mistri-ai.git
@@ -21,6 +21,8 @@ cp .env.example .env
 ```
 
 Set `POSTGRES_PASSWORD`, `JWT_SECRET` (32+ characters), and `PYAI_API_KEY` in `.env`.
+Set `LLM_API_KEY` too if you want speaker-name inference (`apps/ai`) to actually
+run — see [apps/ai/README.md](apps/ai/README.md).
 
 ```bash
 # example — run locally, do not commit the output
@@ -31,6 +33,7 @@ Then:
 
 ```bash
 pnpm db:up
+pnpm redis:up
 pnpm db:migrate
 pnpm db:seed
 pnpm dev
@@ -52,6 +55,7 @@ The UI ships with demo call data so you can explore Calls, Deals, and Ask Mistri
 | `pnpm build` | Typecheck and build both apps |
 | `pnpm typecheck` | Typecheck both apps |
 | `pnpm db:up` | Start Postgres via Docker Compose |
+| `pnpm redis:up` | Start Redis via Docker Compose (BullMQ job queue) |
 | `pnpm db:migrate` | Apply SQL schema |
 | `pnpm db:seed` | Insert demo users and deals (`SEED_USER_PASSWORD` required) |
 
@@ -70,6 +74,7 @@ Authenticated routes expect `Authorization: Bearer <token>`.
 | `GET`/`PATCH` | `/api/calls/:id` | GET includes `transcriptions`; PATCH maps `dealId` |
 | `GET` | `/api/calls/:id/transcriptions` | JSON array of segment objects |
 | `POST` | `/api/calls/:id/transcribe` | re-run PyAI Hear on the stored file |
+| `POST` | `/api/calls/:id/infer-and-rename` | `202`, queues a BullMQ job (`apps/ai` inference); no polling endpoint yet |
 | `POST` | `/api/calls/upload` | multipart `file` + optional `dealId`; transcribes via PyAI |
 | `POST` | `/api/calls/link` | JSON `{ url, dealId? }` |
 
@@ -86,10 +91,14 @@ apps/api/src
   routes/        Express routers
   middleware/    auth, upload, errors
   services/      business rules
+  queue/         BullMQ job queue + worker (speaker inference)
 apps/frontend/src
   pages/         Calls, Deals, Ask
   components/    layout + shadcn/ui
   state/         demo workspace store
+apps/ai/src
+  llm/           provider-agnostic LLM client (see apps/ai/README.md)
+  speakerInference.ts, speakerNameMapper.ts
 ```
 
 ## Contributing

@@ -176,6 +176,53 @@ export const openApiSpec = {
           updated_at: { type: "string", format: "date-time" },
         },
       },
+      InferredSpeaker: {
+        type: "object",
+        required: ["label", "suggestedName", "confidence", "evidence"],
+        properties: {
+          label: { type: "string", example: "speaker_1" },
+          suggestedName: { type: "string", example: "Nick" },
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+          evidence: { type: "string", description: "Short quote or reason from the transcript" },
+        },
+      },
+      NamedTranscriptSegment: {
+        type: "object",
+        required: ["id", "type", "text", "speakerName"],
+        properties: {
+          id: { type: "string", example: "seg_1" },
+          type: { type: "string", enum: ["final", "partial"] },
+          start: { type: "number", nullable: true, description: "Start time in seconds" },
+          end: { type: "number", nullable: true, description: "End time in seconds" },
+          speaker: { type: "string", nullable: true, description: "Diarized speaker label from PyAI Hear Telephony (e.g. speaker_0)" },
+          text: { type: "string" },
+          speakerName: {
+            type: "string",
+            description: "Resolved display name, or the raw speaker label / \"Unknown Speaker\" when unresolved",
+          },
+        },
+      },
+      InferAndRenameResponse: {
+        type: "object",
+        required: ["inferred", "transcript", "readable"],
+        properties: {
+          inferred: {
+            type: "array",
+            items: { $ref: "#/components/schemas/InferredSpeaker" },
+            description: "Suggestions only, not final answers — confirm with a human before committing to a name",
+          },
+          transcript: {
+            type: "array",
+            items: { $ref: "#/components/schemas/NamedTranscriptSegment" },
+          },
+          readable: { type: "string", description: "Flattened \"SpeakerName: text\" lines" },
+          reason: {
+            type: "string",
+            description:
+              "Present only when inference was short-circuited, e.g. no diarization data or no segments — inferred is [] in that case",
+          },
+        },
+      },
       LinkCallRequest: {
         type: "object",
         required: ["url"],
@@ -762,6 +809,37 @@ export const openApiSpec = {
           "401": { description: "Authentication required" },
           "403": { description: "Not allowed to access this call" },
           "404": { description: "Call not found" },
+        },
+      },
+    },
+    "/api/calls/{id}/infer-and-rename": {
+      post: {
+        tags: ["Transcriptions"],
+        summary: "Queue LLM speaker-name inference for a call's transcription",
+        description:
+          "Enqueues a BullMQ job (queue: infer-and-rename) that infers a real name per diarized speaker label from the call's most recent ready transcription, via an OpenAI-compatible LLM (see apps/ai). Processing happens asynchronously in a worker within the apps/api process, not on this request — this endpoint only validates and enqueues, then returns immediately. Results (suggestions with confidence/evidence, not final answers) are upserted into call_transcripts keyed by transcription_id once the job completes; there is currently no GET endpoint to poll that result over HTTP.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: "#/components/parameters/UuidId" }],
+        responses: {
+          "202": {
+            description: "Job queued",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    status: { type: "string", example: "queued" },
+                    transcriptionId: { type: "string", format: "uuid" },
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "Call has no transcription to infer speakers from" },
+          "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to access this call" },
+          "404": { description: "Call not found" },
+          "409": { description: "Transcription is not ready yet" },
         },
       },
     },
