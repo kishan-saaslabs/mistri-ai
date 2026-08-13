@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { Diamond, Loader2, LogOut, MessageCircleQuestion, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +33,7 @@ const nav = [
 export function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -66,13 +67,19 @@ export function Sidebar() {
           <NavLink
             key={item.to}
             to={item.to}
-            className={({ isActive }) =>
-              cn(
+            className={({ isActive }) => {
+              const active =
+                item.to === "/deals"
+                  ? pathname === "/deals" ||
+                    pathname.startsWith("/deals/") ||
+                    pathname.startsWith("/calls/")
+                  : isActive;
+              return cn(
                 "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] text-ink-soft",
-                isActive && "bg-muted font-semibold text-foreground",
-                !isActive && "hover:bg-muted hover:text-foreground",
-              )
-            }
+                active && "bg-muted font-semibold text-foreground",
+                !active && "hover:bg-muted hover:text-foreground",
+              );
+            }}
           >
             <item.icon className="size-3.5 opacity-85" />
             {item.label}

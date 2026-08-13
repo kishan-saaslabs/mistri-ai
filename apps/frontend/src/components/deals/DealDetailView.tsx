@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Loader2, Plus, UserPlus } from "lucide-react";
+import { Link, useOutletContext, useParams } from "react-router-dom";
+import { Loader2, Plus, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { AddCallDialog } from "@/components/deals/AddCallDialog";
 import { Button } from "@/components/ui/button";
@@ -22,11 +22,11 @@ import {
   type AuthUser,
   type Call,
   type CallStatus,
-  type Deal,
 } from "@/lib/api";
 import { formatDate, initialsOf, roleLabel } from "@/lib/display";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { cn } from "@/lib/utils";
+import type { DealsOutletContext } from "@/components/deals/DealsLayout";
 
 const POLL_MS = 5_000;
 
@@ -109,20 +109,22 @@ function useDealCalls(dealId: string) {
 
 export function DealDetailView() {
   const { id = "" } = useParams();
+  const {
+    deals,
+    loading: dealsLoading,
+    error: dealsError,
+  } = useOutletContext<DealsOutletContext>();
   const [tab, setTab] = useState("calls");
   const [addOpen, setAddOpen] = useState(false);
 
-  const dealState = useAsyncData<Deal | null>(
-    () => dealsApi.list().then((deals) => deals.find((d) => d.id === id) ?? null),
-    [id],
-  );
+  const deal = deals.find((d) => d.id === id) ?? null;
   const callsState = useDealCalls(id);
   const membersState = useAsyncData<AuthUser[]>(
     () => dealsApi.members(id),
     [id],
   );
 
-  if (dealState.loading) {
+  if (dealsLoading && !deal) {
     return (
       <div className="flex h-full items-center justify-center">
         <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -130,33 +132,23 @@ export function DealDetailView() {
     );
   }
 
-  if (dealState.error || !dealState.data) {
+  if (!deal) {
     return (
       <div className="mx-auto w-full max-w-[760px] px-7 pt-[60px] text-center">
         <p className="mb-3 text-[13.5px] text-muted-foreground">
-          {dealState.error ?? "This deal could not be found."}
+          {dealsError ?? "This deal could not be found."}
         </p>
         <Button asChild variant="outline" size="sm">
-          <Link to="/deals">Back to deals</Link>
+          <Link to="/deals">Back to overview</Link>
         </Button>
       </div>
     );
   }
-
-  const deal = dealState.data;
   const members = membersState.data ?? [];
   const callCount = callsState.calls.length;
 
   return (
     <div className="mx-auto w-full max-w-[900px] overflow-y-auto px-7 pt-8 pb-[60px]">
-      <Link
-        to="/deals"
-        className="mb-4 inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-3.5" />
-        All deals
-      </Link>
-
       {/* Header + stat strip */}
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>

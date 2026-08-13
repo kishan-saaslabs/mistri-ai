@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, ArrowUpRight, ChevronDown, Circle, Loader2, Pause, Play } from "lucide-react";
+import { Link, useOutletContext, useParams } from "react-router-dom";
+import {
+  ArrowLeft,
+  ArrowUpRight,
+  ChevronDown,
+  Circle,
+  Loader2,
+  Pause,
+  Play,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,6 +35,7 @@ import {
   type Transcription,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import type { DealsOutletContext } from "@/components/deals/DealsLayout";
 
 const SPEAKER_TONES = [
   { border: "border-l-brand", pill: "bg-brand-tint text-brand" },
@@ -314,6 +323,7 @@ function toExportMarkdown(
 
 export function CallDetailView() {
   const { id = "" } = useParams();
+  const { setActiveDealId } = useOutletContext<DealsOutletContext>();
   const [data, setData] = useState<CallDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -349,6 +359,11 @@ export function CallDetailView() {
       active = false;
     };
   }, [id, nonce]);
+
+  useEffect(() => {
+    setActiveDealId(data?.call.deal_id ?? null);
+    return () => setActiveDealId(null);
+  }, [data?.call.deal_id, setActiveDealId]);
 
   const pending = data ? isPending(data) : false;
   useEffect(() => {
