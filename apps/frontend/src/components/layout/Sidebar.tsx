@@ -1,5 +1,14 @@
+import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Diamond, LogOut, MessageCircleQuestion, Users } from "lucide-react";
+import { Diamond, Loader2, LogOut, MessageCircleQuestion, Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/state/auth";
 
@@ -23,10 +32,19 @@ const nav = [
 export function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   async function handleLogout() {
-    await logout();
-    void navigate("/login", { replace: true });
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await logout();
+      void navigate("/login", { replace: true });
+    } finally {
+      setSigningOut(false);
+      setConfirmOpen(false);
+    }
   }
 
   const roleLabel = user?.role
@@ -75,7 +93,7 @@ export function Sidebar() {
         </div>
         <button
           type="button"
-          onClick={() => void handleLogout()}
+          onClick={() => setConfirmOpen(true)}
           aria-label="Sign out"
           title="Sign out"
           className="flex size-6 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -83,6 +101,41 @@ export function Sidebar() {
           <LogOut className="size-3.5" />
         </button>
       </div>
+
+      <Dialog
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          if (!signingOut) setConfirmOpen(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-[380px]">
+          <DialogHeader>
+            <DialogTitle>Sign out?</DialogTitle>
+            <DialogDescription>
+              You'll need to sign in again to access this workspace.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirmOpen(false)}
+              disabled={signingOut}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void handleLogout()}
+              disabled={signingOut}
+            >
+              {signingOut ? <Loader2 className="size-4 animate-spin" /> : null}
+              Sign out
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }

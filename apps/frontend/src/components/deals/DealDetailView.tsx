@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -26,10 +26,25 @@ import { formatDate, initialsOf, roleLabel } from "@/lib/display";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { cn } from "@/lib/utils";
 
-const STATUS_STYLES: Record<CallStatus, { dot: string; label: string }> = {
+const POLL_MS = 5_000;
+
+const STATUS_STYLES: Record<
+  CallStatus,
+  { dot: string; label: string; row?: string; text?: string }
+> = {
   ready: { dot: "bg-success", label: "Ready" },
-  processing: { dot: "bg-warning", label: "Processing" },
-  queued: { dot: "bg-[#b9bdbf]", label: "Queued" },
+  processing: {
+    dot: "animate-pulse bg-warning",
+    label: "Processing",
+    row: "bg-warning-tint/70",
+    text: "text-warning",
+  },
+  queued: {
+    dot: "animate-pulse bg-warning",
+    label: "Queued",
+    row: "bg-warning-tint/40",
+    text: "text-warning",
+  },
   failed: { dot: "bg-danger", label: "Failed" },
 };
 
@@ -105,8 +120,35 @@ function CallsTab({ dealId }: { dealId: string }) {
     [dealId],
   );
   const [addOpen, setAddOpen] = useState(false);
+  const [live, setLive] = useState<Call[] | null>(null);
 
-  const calls = data ?? [];
+  const calls = live ?? data ?? [];
+  const hasPending = calls.some(
+    (call) => call.status === "queued" || call.status === "processing",
+  );
+
+  useEffect(() => {
+    setLive(null);
+  }, [dealId]);
+
+  useEffect(() => {
+    if (!hasPending) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      dealsApi
+        .calls(dealId)
+        .then((next) => {
+          if (active) setLive(next);
+        })
+        .catch(() => {
+          // Keep the last list while a poll fails.
+        });
+    }, POLL_MS);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [hasPending, dealId]);
 
   return (
     <div>
@@ -160,11 +202,13 @@ function CallsTab({ dealId }: { dealId: string }) {
           {calls.map((call, i) => {
             const status = STATUS_STYLES[call.status];
             return (
-              <div
+              <Link
                 key={call.id}
+                to={`/calls/${call.id}`}
                 className={cn(
-                  "flex items-center gap-3 px-4 py-3",
+                  "flex items-center gap-3 px-4 py-3 hover:bg-muted/60",
                   i !== calls.length - 1 && "border-b border-border",
+                  status.row,
                 )}
               >
                 <span
@@ -174,12 +218,17 @@ function CallsTab({ dealId }: { dealId: string }) {
                   <div className="truncate text-[13px] font-medium">
                     {call.label}
                   </div>
-                  <div className="mt-px font-mono text-[10.5px] text-muted-foreground">
+                  <div
+                    className={cn(
+                      "mt-px font-mono text-[10.5px]",
+                      status.text ?? "text-muted-foreground",
+                    )}
+                  >
                     {status.label} · {formatDuration(call.duration_seconds)} ·{" "}
                     {formatDate(call.created_at)}
                   </div>
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>
@@ -189,7 +238,10 @@ function CallsTab({ dealId }: { dealId: string }) {
         open={addOpen}
         onOpenChange={setAddOpen}
         dealId={dealId}
-        onAdded={refetch}
+        onAdded={() => {
+          setLive(null);
+          refetch();
+        }}
       />
     </div>
   );

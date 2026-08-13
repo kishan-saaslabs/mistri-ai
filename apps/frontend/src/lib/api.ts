@@ -52,6 +52,37 @@ export type Call = {
   created_at: string;
 };
 
+export type TranscriptSegment = {
+  id: string;
+  type: "final" | "partial";
+  start: number | null;
+  end: number | null;
+  speaker: string | null;
+  text: string;
+};
+
+export type TranscriptionStatus = "processing" | "ready" | "failed";
+
+export type Transcription = {
+  id: string;
+  call_id: string;
+  provider: string;
+  model: string;
+  status: TranscriptionStatus;
+  language: string | null;
+  duration_seconds: number | null;
+  full_text: string | null;
+  segments: TranscriptSegment[];
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CallDetail = {
+  call: Call;
+  transcriptions: Transcription[];
+};
+
 export type CreateOrgUserInput = {
   email: string;
   password: string;
@@ -183,6 +214,8 @@ export const usersApi = {
 };
 
 export const callsApi = {
+  get: (id: string) => request<CallDetail>(`/calls/${id}`),
+
   uploadToDeal: (dealId: string, file: File) => {
     const form = new FormData();
     form.append("file", file);
