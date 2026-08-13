@@ -61,3 +61,35 @@ test("falls back to the LLM (via a mock client) when the regex pre-pass can't re
 
   assert.deepEqual(result, JSON.parse(canned));
 });
+
+test("rejects the LLM reusing an already-resolved name for a different speaker, falling back instead of duplicating it", async () => {
+  // Reproduces a real reported bug: speaker_1 introduces herself AND greets
+  // speaker_2 by name in the same turn ("this is Devanshi" resolves via
+  // regex), speaker_2's reply doesn't match any self-intro pattern so it
+  // falls to the LLM — which (like a real small model did) incorrectly
+  // attributes "Devanshi" to speaker_2 as well.
+  const transcript: Transcript = [
+    { id: "1", type: "final", start: 0, end: 2, speaker: "speaker_1", text: "Hi, this is Devanshi, hi Rahul!" },
+    { id: "2", type: "final", start: 2, end: 4, speaker: "speaker_2", text: "Hey Devanshi, good to hear from you." },
+  ];
+
+  // The (buggy) response the LLM would give: reuses "Devanshi" for speaker_2.
+  const colliding = JSON.stringify([
+    { label: "speaker_2", suggestedName: "Devanshi", confidence: "medium", evidence: "Hey Devanshi" },
+  ]);
+
+  const client = new MockClient(colliding);
+  const result = await inferSpeakerNames(transcript, client);
+
+  assert.equal(client.calls.length, 2, "the colliding response should be rejected once, then retried once more");
+
+  const speaker1 = result.find((r) => r.label === "speaker_1");
+  const speaker2 = result.find((r) => r.label === "speaker_2");
+  assert.equal(speaker1?.suggestedName, "Devanshi", "speaker_1 correctly resolved via regex");
+  assert.notEqual(
+    speaker2?.suggestedName.toLowerCase(),
+    "devanshi",
+    "speaker_2 must not end up with the same real name as a different speaker",
+  );
+  assert.equal(speaker2?.confidence, "low", "double-invalid response should degrade to the positional fallback");
+});
