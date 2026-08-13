@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -15,7 +15,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDuration } from "@/lib/format";
 import {
   ApiError,
+  callsApi,
   dealsApi,
+  isPendingStatus,
   usersApi,
   type AuthUser,
   type Call,
@@ -26,11 +28,34 @@ import { formatDate, initialsOf, roleLabel } from "@/lib/display";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { cn } from "@/lib/utils";
 
-const STATUS_STYLES: Record<CallStatus, { dot: string; label: string }> = {
-  ready: { dot: "bg-success", label: "Ready" },
-  processing: { dot: "bg-warning", label: "Processing" },
-  queued: { dot: "bg-[#b9bdbf]", label: "Queued" },
-  failed: { dot: "bg-danger", label: "Failed" },
+const POLL_MS = 5_000;
+
+const STATUS_STYLES: Record<
+  CallStatus,
+  { dot: string; label: string; row?: string; text?: string }
+> = {
+  PROCESSING: {
+    dot: "animate-pulse bg-warning",
+    label: "Processing",
+    row: "bg-warning-tint/70",
+    text: "text-warning",
+  },
+  PYAI_TRANSCRIBING: {
+    dot: "animate-pulse bg-warning",
+    label: "Transcribing",
+    row: "bg-warning-tint/70",
+    text: "text-warning",
+  },
+  PYAI_SUCCESS: { dot: "bg-success", label: "Ready" },
+  PYAI_FAILED: { dot: "bg-danger", label: "Failed" },
+  LLM_TRANSCRIBING: {
+    dot: "animate-pulse bg-warning",
+    label: "Analyzing",
+    row: "bg-warning-tint/40",
+    text: "text-warning",
+  },
+  LLM_SUCCESS: { dot: "bg-success", label: "Ready" },
+  LLM_FAILED: { dot: "bg-danger", label: "Failed" },
 };
 
 export function DealDetailView() {
@@ -105,8 +130,44 @@ function CallsTab({ dealId }: { dealId: string }) {
     [dealId],
   );
   const [addOpen, setAddOpen] = useState(false);
+  const [overrides, setOverrides] = useState<Record<string, Call>>({});
 
-  const calls = data ?? [];
+  const calls = (data ?? []).map((call) => overrides[call.id] ?? call);
+  const pendingKey = calls
+    .filter((call) => isPendingStatus(call.status))
+    .map((call) => call.id)
+    .sort()
+    .join(",");
+
+  useEffect(() => {
+    setOverrides({});
+  }, [dealId]);
+
+  useEffect(() => {
+    if (!pendingKey) return;
+    const ids = pendingKey.split(",");
+    let active = true;
+    const timer = window.setInterval(() => {
+      void Promise.allSettled(ids.map((id) => callsApi.get(id))).then(
+        (results) => {
+          if (!active) return;
+          setOverrides((prev) => {
+            const next = { ...prev };
+            for (const result of results) {
+              if (result.status === "fulfilled") {
+                next[result.value.call.id] = result.value.call;
+              }
+            }
+            return next;
+          });
+        },
+      );
+    }, POLL_MS);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [pendingKey]);
 
   return (
     <div>
@@ -160,11 +221,13 @@ function CallsTab({ dealId }: { dealId: string }) {
           {calls.map((call, i) => {
             const status = STATUS_STYLES[call.status];
             return (
-              <div
+              <Link
                 key={call.id}
+                to={`/calls/${call.id}`}
                 className={cn(
-                  "flex items-center gap-3 px-4 py-3",
+                  "flex items-center gap-3 px-4 py-3 hover:bg-muted/60",
                   i !== calls.length - 1 && "border-b border-border",
+                  status.row,
                 )}
               >
                 <span
@@ -174,12 +237,17 @@ function CallsTab({ dealId }: { dealId: string }) {
                   <div className="truncate text-[13px] font-medium">
                     {call.label}
                   </div>
-                  <div className="mt-px font-mono text-[10.5px] text-muted-foreground">
+                  <div
+                    className={cn(
+                      "mt-px font-mono text-[10.5px]",
+                      status.text ?? "text-muted-foreground",
+                    )}
+                  >
                     {status.label} · {formatDuration(call.duration_seconds)} ·{" "}
                     {formatDate(call.created_at)}
                   </div>
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>
@@ -189,7 +257,10 @@ function CallsTab({ dealId }: { dealId: string }) {
         open={addOpen}
         onOpenChange={setAddOpen}
         dealId={dealId}
-        onAdded={refetch}
+        onAdded={() => {
+          setOverrides({});
+          refetch();
+        }}
       />
     </div>
   );

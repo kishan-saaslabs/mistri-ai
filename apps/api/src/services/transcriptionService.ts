@@ -1,9 +1,31 @@
 import { extname, resolve } from "node:path";
+import {
+  applySpeakerNames,
+  getLLMClient,
+  inferSpeakerNames,
+  renderNamedTranscript,
+  type InferredSpeaker,
+  type NamedTranscript,
+  type SpeakerMap,
+} from "@mistri-ai/ai";
 import { env } from "../config/env.js";
 import { uploadRoot } from "../middleware/upload.js";
 import { CallModel } from "../models/callModel.js";
-import { TranscriptionModel } from "../models/transcriptionModel.js";
+import { CallTranscriptModel } from "../models/callTranscriptModel.js";
+import { TranscriptionModel, type TranscriptionRecord } from "../models/transcriptionModel.js";
+import { publishInferAndRenameJob } from "../queue/inferAndRenameQueue.js";
 import { transcribeAudioFile } from "./pyaiHear.js";
+
+export type InferAndRenameResult = {
+  inferred: InferredSpeaker[];
+  transcript: NamedTranscript;
+  readable: string;
+  reason?: string;
+};
+
+function toSpeakerMap(inferred: InferredSpeaker[]): SpeakerMap {
+  return Object.fromEntries(inferred.map((item) => [item.label, item.suggestedName]));
+}
 
 const mimeByExt: Record<string, string> = {
   ".mp3": "audio/mpeg",
@@ -32,12 +54,19 @@ export const TranscriptionService = {
     try {
       const filename = call.filename || call.storage_path;
       const ext = extname(filename).toLowerCase();
-      const result = await transcribeAudioFile({
-        absolutePath: resolve(uploadRoot, call.storage_path),
-        filename,
-        mimeType: mimeByExt[ext] ?? "application/octet-stream",
-        audioUrl: call.source_url && /^https?:\/\//i.test(call.source_url) ? call.source_url : undefined,
-      });
+      const result = await transcribeAudioFile(
+        {
+          absolutePath: resolve(uploadRoot, call.storage_path),
+          filename,
+          mimeType: mimeByExt[ext] ?? "application/octet-stream",
+          audioUrl: call.source_url && /^https?:\/\//i.test(call.source_url) ? call.source_url : undefined,
+        },
+        {
+          onJobSubmitted: async () => {
+            await TranscriptionModel.markTranscribing(row.id);
+          },
+        },
+      );
 
       const saved = await TranscriptionModel.markReady(row.id, {
         language: result.language,
@@ -45,19 +74,76 @@ export const TranscriptionService = {
         fullText: result.fullText,
         segments: result.segments,
       });
+      if (!saved) {
+        throw new Error("Could not save transcription");
+      }
 
       const duration = result.durationSeconds != null ? Math.round(result.durationSeconds) : undefined;
-      await CallModel.updateStatus(callId, "ready", duration);
+      await CallModel.updateStatus(callId, "PYAI_SUCCESS", duration);
+
+      try {
+        await publishInferAndRenameJob({ callId, transcriptionId: saved.id });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Queue publish failed";
+        console.error("Could not enqueue infer-and-rename:", message);
+      }
+
       return saved;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Transcription failed";
       await TranscriptionModel.markFailed(row.id, message);
-      await CallModel.updateStatus(callId, "failed");
+      await CallModel.updateStatus(callId, "PYAI_FAILED");
       throw error;
     }
   },
 
   listForCall(callId: string) {
     return TranscriptionModel.listByCallId(callId);
+  },
+
+  async inferAndRenameSpeakers(transcription: TranscriptionRecord): Promise<InferAndRenameResult> {
+    const segments = transcription.segments;
+
+    if (segments.length === 0) {
+      const named = applySpeakerNames(segments, {});
+      return {
+        inferred: [],
+        transcript: named,
+        readable: renderNamedTranscript(named),
+        reason: "transcription has no segments",
+      };
+    }
+
+    if (!segments.some((segment) => segment.speaker !== null)) {
+      const named = applySpeakerNames(segments, {});
+      return {
+        inferred: [],
+        transcript: named,
+        readable: renderNamedTranscript(named),
+        reason: "no diarization data available for this transcript",
+      };
+    }
+
+    const cached = await CallTranscriptModel.findByTranscriptionId(transcription.id);
+    if (cached) {
+      return {
+        inferred: cached.inferred_speakers,
+        transcript: cached.segments,
+        readable: renderNamedTranscript(cached.segments),
+      };
+    }
+
+    const client = getLLMClient();
+    const inferred = await inferSpeakerNames(segments, client);
+    const named = applySpeakerNames(segments, toSpeakerMap(inferred));
+    const readable = renderNamedTranscript(named);
+    await CallTranscriptModel.upsert({
+      callId: transcription.call_id,
+      transcriptionId: transcription.id,
+      segments: named,
+      inferredSpeakers: inferred,
+    });
+
+    return { inferred, transcript: named, readable };
   },
 };

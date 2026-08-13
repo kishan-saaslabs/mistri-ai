@@ -36,7 +36,28 @@ export type Deal = {
   created_at: string;
 };
 
-export type CallStatus = "queued" | "processing" | "ready" | "failed";
+export type CallStatus =
+  | "PROCESSING"
+  | "PYAI_TRANSCRIBING"
+  | "PYAI_SUCCESS"
+  | "PYAI_FAILED"
+  | "LLM_TRANSCRIBING"
+  | "LLM_SUCCESS"
+  | "LLM_FAILED";
+
+export type TranscriptionStatus = CallStatus;
+
+export function isPendingStatus(status: CallStatus) {
+  return (
+    status === "PROCESSING" ||
+    status === "PYAI_TRANSCRIBING" ||
+    status === "LLM_TRANSCRIBING"
+  );
+}
+
+export function isFailedStatus(status: CallStatus) {
+  return status === "PYAI_FAILED" || status === "LLM_FAILED";
+}
 
 export type Call = {
   id: string;
@@ -47,9 +68,38 @@ export type Call = {
   filename: string | null;
   duration_seconds: number;
   status: CallStatus;
-  storage_path: string | null;
+  fileUrl: string | null;
   source_url: string | null;
   created_at: string;
+};
+
+export type TranscriptSegment = {
+  id: string;
+  type: "final" | "partial";
+  start: number | null;
+  end: number | null;
+  speaker: string | null;
+  text: string;
+};
+
+export type Transcription = {
+  id: string;
+  call_id: string;
+  provider: string;
+  model: string;
+  status: TranscriptionStatus;
+  language: string | null;
+  duration_seconds: number | null;
+  full_text: string | null;
+  segments: TranscriptSegment[];
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CallDetail = {
+  call: Call;
+  transcriptions: Transcription[];
 };
 
 export type CreateOrgUserInput = {
@@ -183,6 +233,10 @@ export const usersApi = {
 };
 
 export const callsApi = {
+  get: (id: string) => request<CallDetail>(`/calls/${id}`),
+
+  audioUrl: (id: string) => `${API_BASE}/api/calls/${id}/audio`,
+
   uploadToDeal: (dealId: string, file: File) => {
     const form = new FormData();
     form.append("file", file);

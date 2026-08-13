@@ -20,6 +20,14 @@ const allowedMime = new Set([
 
 const allowedExt = new Set([".mp3", ".wav", ".m4a", ".mp4", ".webm"]);
 
+export const audioMimeByExt: Record<string, string> = {
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".m4a": "audio/mp4",
+  ".mp4": "video/mp4",
+  ".webm": "audio/webm",
+};
+
 export const uploadRoot = resolve(process.cwd(), env.UPLOAD_DIR);
 mkdirSync(uploadRoot, { recursive: true });
 

@@ -1,0 +1,1060 @@
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Link, useParams } from "react-router-dom";
+import { ArrowLeft, ArrowUpRight, Circle, Loader2, Pause, Play } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { formatDuration } from "@/lib/format";
+import {
+  ApiError,
+  callsApi,
+  isFailedStatus,
+  isPendingStatus,
+  type Call,
+  type CallDetail,
+  type TranscriptSegment,
+  type Transcription,
+} from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+const SPEAKER_TONES = [
+  { border: "border-l-brand", pill: "bg-brand-tint text-brand" },
+  { border: "border-l-warning", pill: "bg-warning-tint text-[#8a5a17]" },
+  { border: "border-l-success", pill: "bg-success-tint text-success" },
+  { border: "border-l-danger", pill: "bg-danger-tint text-danger" },
+] as const;
+
+// ponytail: intel is hardcoded until the analysis API exists
+const DEMO_INTEL = {
+  runStatus: "Shipped",
+  summary: {
+    title: "Ready to move forward on Pro",
+    desc: "Customer confirmed readiness to proceed with the Pro plan after discussing pricing.",
+    segId: "seg_0003",
+    quote: "we're ready to move forward with the Pro plan",
+  },
+  objection: {
+    title: "Pricing higher than today",
+    desc: "Customer said pricing is higher than their current spend.",
+    segId: "seg_0002",
+    quote: "pricing gave us pause",
+  },
+  intent: {
+    title: "Buy Pro 86%",
+    segId: "seg_0003",
+    quote: "ready to move forward with the Pro plan",
+  },
+  nextSteps: [
+    {
+      text: "Send security documentation today",
+      owner: "REP",
+      segId: "seg_0004",
+      quote: "I'll get the security docs over today",
+    },
+    {
+      text: "Review proposal and follow up Friday",
+      owner: "CUSTOMER",
+      segId: "seg_0005",
+      quote: "circle back Friday",
+    },
+  ],
+  email: {
+    subject: "Acme Pro renewal — security docs + Friday check-in",
+    body: "Hi team,",
+  },
+};
+
+const POLL_MS = 5_000;
+
+function isPending(detail: CallDetail) {
+  return (
+    isPendingStatus(detail.call.status) ||
+    detail.transcriptions.some((row) => isPendingStatus(row.status))
+  );
+}
+
+function latestTranscription(rows: Transcription[]) {
+  return rows[0] ?? null;
+}
+
+function visibleSegments(row: Transcription | null): TranscriptSegment[] {
+  const raw = Array.isArray(row?.segments) ? row.segments : [];
+  const withText = raw.filter((seg) => seg.text.trim());
+  const finals = withText.filter((seg) => seg.type !== "partial");
+  return finals.length > 0 ? finals : withText;
+}
+
+function speakerKey(speaker: string | null) {
+  return speaker?.trim() || "speaker_0";
+}
+
+function prettySpeaker(raw: string) {
+  const match = raw.match(/^(?:speaker|spk)[_-]?(\d+)$/i);
+  if (match) return `Speaker ${Number(match[1]) + 1}`;
+  return raw.replace(/_/g, " ");
+}
+
+function shortId(id: string) {
+  return id.replaceAll("-", "").slice(0, 8);
+}
+
+function modelLabel(model: string | undefined) {
+  if (!model) return "—";
+  return model.replace(/^pyai-hear-/, "");
+}
+
+function uniqueSpeakerKeys(segments: TranscriptSegment[]) {
+  const keys: string[] = [];
+  for (const seg of segments) {
+    const key = speakerKey(seg.speaker);
+    if (!keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
+
+function toneFor(key: string, keys: string[]) {
+  const index = Math.max(0, keys.indexOf(key));
+  return SPEAKER_TONES[index % SPEAKER_TONES.length]!;
+}
+
+function resolveSeg(
+  segId: string,
+  segments: TranscriptSegment[],
+): TranscriptSegment | undefined {
+  const byId = segments.find((seg) => seg.id === segId);
+  if (byId) return byId;
+  const n = Number(segId.replace(/\D/g, ""));
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return segments[n - 1];
+}
+
+function playbackSrc(call: Call) {
+  const hosted = call.fileUrl ?? "";
+  if (/\/api\/calls\/[^/?]+\/(?:file|audio)(?:\?|$)/.test(hosted)) {
+    return callsApi.audioUrl(call.id);
+  }
+  const url = (call.source_url ?? call.fileUrl)?.trim() ?? "";
+  return /^https?:\/\//i.test(url) ? url : null;
+}
+
+function segmentAtTime(segments: TranscriptSegment[], time: number) {
+  let current: TranscriptSegment | undefined;
+  let best = -Infinity;
+  for (const seg of segments) {
+    if (seg.start == null || seg.start > time) continue;
+    if (seg.end != null && time >= seg.end) continue;
+    if (seg.start >= best) {
+      best = seg.start;
+      current = seg;
+    }
+  }
+  return current;
+}
+
+type Evidence = {
+  segId: string;
+  speaker: string;
+  time: string;
+  quote: string;
+  targetId: string | null;
+};
+
+function downloadText(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function slugify(value: string) {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 60) || "call"
+  );
+}
+
+type ExportScope = "transcript" | "intel" | "both";
+type ExportFormat = "markdown" | "json";
+
+function transcriptLines(segments: TranscriptSegment[]) {
+  return segments.map((seg) => ({
+    Speaker: prettySpeaker(speakerKey(seg.speaker)),
+    time: seg.start != null ? formatDuration(seg.start) : "—",
+    text: seg.text,
+  }));
+}
+
+function intelExport(pending: boolean) {
+  return {
+    "Run status": pending ? "Processing" : DEMO_INTEL.runStatus,
+    Summary: {
+      title: DEMO_INTEL.summary.title,
+      description: DEMO_INTEL.summary.desc,
+      segment: DEMO_INTEL.summary.segId,
+    },
+    Objections: {
+      title: DEMO_INTEL.objection.title,
+      description: DEMO_INTEL.objection.desc,
+      segment: DEMO_INTEL.objection.segId,
+    },
+    Intent: {
+      title: DEMO_INTEL.intent.title,
+      segment: DEMO_INTEL.intent.segId,
+    },
+    "Next steps": DEMO_INTEL.nextSteps.map((step) => ({
+      text: step.text,
+      owner: step.owner,
+      segment: step.segId,
+    })),
+    "Follow-up email": {
+      subject: DEMO_INTEL.email.subject,
+      body: DEMO_INTEL.email.body,
+    },
+  };
+}
+
+function toExportJson(
+  scope: ExportScope,
+  segments: TranscriptSegment[],
+  pending: boolean,
+) {
+  const out: Record<string, unknown> = {};
+  if (scope === "transcript" || scope === "both") {
+    out.Transcript = transcriptLines(segments);
+  }
+  if (scope === "intel" || scope === "both") {
+    out.Intel = intelExport(pending);
+  }
+  return out;
+}
+
+function toExportMarkdown(
+  title: string,
+  scope: ExportScope,
+  segments: TranscriptSegment[],
+  pending: boolean,
+) {
+  const lines = [`# ${title}`, ""];
+  if (scope === "transcript" || scope === "both") {
+    lines.push("## Transcript", "");
+    const rows = transcriptLines(segments);
+    if (rows.length === 0) {
+      lines.push("_No transcript._", "");
+    } else {
+      for (const row of rows) {
+        lines.push(`**${row.Speaker}** · ${row.time}`, row.text, "");
+      }
+    }
+  }
+  if (scope === "intel" || scope === "both") {
+    const intel = intelExport(pending);
+    lines.push("## Intel", "");
+    lines.push("### Run status", "", intel["Run status"], "");
+    lines.push(
+      "### Summary",
+      "",
+      `**${intel.Summary.title}**`,
+      "",
+      intel.Summary.description,
+      "",
+      intel.Summary.segment,
+      "",
+    );
+    lines.push(
+      "### Objections",
+      "",
+      `**${intel.Objections.title}**`,
+      "",
+      intel.Objections.description,
+      "",
+      intel.Objections.segment,
+      "",
+    );
+    lines.push(
+      "### Intent",
+      "",
+      `**${intel.Intent.title}**`,
+      "",
+      intel.Intent.segment,
+      "",
+    );
+    lines.push("### Next steps", "");
+    for (const step of intel["Next steps"]) {
+      lines.push(`- ${step.text} (${step.owner})`);
+    }
+    lines.push("");
+    lines.push(
+      "### Follow-up email",
+      "",
+      `**${intel["Follow-up email"].subject}**`,
+      "",
+      intel["Follow-up email"].body,
+      "",
+    );
+  }
+  return lines.join("\n").trimEnd() + "\n";
+}
+
+export function CallDetailView() {
+  const { id = "" } = useParams();
+  const [data, setData] = useState<CallDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [nonce, setNonce] = useState(0);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [activePlayId, setActivePlayId] = useState<string | null>(null);
+  const [evidence, setEvidence] = useState<Evidence | null>(null);
+  const [seek, setSeek] = useState<{ at: number; n: number } | null>(null);
+  const [exportFormat, setExportFormat] = useState<ExportFormat | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    callsApi
+      .get(id)
+      .then((next) => {
+        if (!active) return;
+        setData(next);
+        setError(null);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setData(null);
+        setError(
+          err instanceof ApiError
+            ? err.message
+            : "Something went wrong. Please try again.",
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [id, nonce]);
+
+  const pending = data ? isPending(data) : false;
+  useEffect(() => {
+    if (!pending) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      callsApi
+        .get(id)
+        .then((next) => {
+          if (active) setData(next);
+        })
+        .catch(() => {
+          // Keep the last successful payload while a poll fails.
+        });
+    }, POLL_MS);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [pending, id]);
+
+  const transcription = data ? latestTranscription(data.transcriptions) : null;
+  const segments = useMemo(
+    () => visibleSegments(transcription),
+    [transcription],
+  );
+  const speakerKeys = useMemo(() => uniqueSpeakerKeys(segments), [segments]);
+  const activeId = activePlayId ?? highlightId;
+
+  useEffect(() => {
+    setActivePlayId(null);
+    setHighlightId(null);
+    setSeek(null);
+  }, [id]);
+
+  useEffect(() => {
+    if (!activePlayId) return;
+    document
+      .getElementById(`row-${activePlayId}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activePlayId]);
+
+  function requestSeek(at: number) {
+    setSeek((prev) => ({ at, n: (prev?.n ?? 0) + 1 }));
+  }
+
+  function openEvidence(segId: string, fallbackQuote?: string) {
+    const target = resolveSeg(segId, segments);
+    const fromTranscript = target?.text.trim();
+    const snippet = fallbackQuote?.trim();
+    const quote =
+      fromTranscript &&
+      snippet &&
+      fromTranscript.toLowerCase().includes(snippet.toLowerCase())
+        ? snippet
+        : fromTranscript || snippet || "—";
+    setEvidence({
+      segId,
+      speaker: target ? speakerKey(target.speaker) : "speaker_1",
+      time: target?.start != null ? formatDuration(target.start) : "—",
+      quote,
+      targetId: target?.id ?? null,
+    });
+  }
+
+  function jumpToTranscript() {
+    const targetId = evidence?.targetId;
+    setEvidence(null);
+    if (!targetId) return;
+    setHighlightId(targetId);
+    const target = segments.find((seg) => seg.id === targetId);
+    if (target?.start != null) requestSeek(target.start);
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="mx-auto w-full max-w-[760px] px-7 pt-[60px] text-center">
+        <p className="mb-3 text-[13.5px] text-muted-foreground">
+          {error ?? "This call could not be found."}
+        </p>
+        <div className="flex justify-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <Link to="/deals">Back to deals</Link>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setNonce((n) => n + 1)}
+          >
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const { call } = data;
+  const duration = transcription?.duration_seconds ?? call.duration_seconds;
+  const audioSrc = playbackSrc(call);
+  const failed =
+    isFailedStatus(call.status) ||
+    (transcription != null && isFailedStatus(transcription.status));
+  const backTo = call.deal_id ? `/deals/${call.deal_id}` : "/deals";
+  const backLabel = call.deal_id ? "Back to deal" : "All deals";
+  const fileBase = slugify(call.label);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden px-7 pt-4 pb-6">
+      <Link
+        to={backTo}
+        className="mb-3 inline-flex w-fit items-center gap-1.5 text-[12.5px] text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="size-3.5" />
+        {backLabel}
+      </Link>
+
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-[19px] font-semibold tracking-tight">
+            {call.label}
+          </h1>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            {pending ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-tint px-2 py-0.5 font-mono text-[11px] font-medium text-warning">
+                <span className="size-1.5 animate-pulse rounded-full bg-warning" />
+                Processing
+              </span>
+            ) : null}
+            <p className="font-mono text-[11.5px] text-muted-foreground">
+              {shortId(call.id)} · {modelLabel(transcription?.model)} ·{" "}
+              {formatDuration(duration)} · {segments.length} line
+              {segments.length === 1 ? "" : "s"} · {speakerKeys.length} speaker
+              {speakerKeys.length === 1 ? "" : "s"}
+            </p>
+            {speakerKeys.map((key) => (
+              <span
+                key={key}
+                className={cn(
+                  "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
+                  toneFor(key, speakerKeys).pill,
+                )}
+              >
+                {prettySpeaker(key)}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setExportFormat("markdown")}
+          >
+            Markdown
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setExportFormat("json")}
+          >
+            JSON
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-background">
+          <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
+            <h3 className="text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase">
+              Transcript
+            </h3>
+            <span
+              className={cn(
+                "font-mono text-[10.5px]",
+                pending ? "text-warning" : "text-muted-foreground",
+              )}
+            >
+              {pending
+                ? "processing"
+                : `${segments.length} line${segments.length === 1 ? "" : "s"}`}
+            </span>
+          </header>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {pending && segments.length === 0 ? (
+              <div className="flex h-full min-h-[220px] flex-col items-center justify-center gap-2 bg-warning-tint/70 px-4">
+                <Loader2 className="size-4 animate-spin text-warning" />
+                <p className="text-[13px] font-medium text-warning">
+                  Transcribing…
+                </p>
+              </div>
+            ) : failed && segments.length === 0 ? (
+              <div className="flex h-full min-h-[220px] flex-col items-center justify-center px-4 text-center">
+                <p className="text-[13px] font-medium">Transcription failed</p>
+                <p className="mt-1 max-w-[42ch] text-[12.5px] text-muted-foreground">
+                  {transcription?.error ||
+                    "The recording could not be transcribed."}
+                </p>
+              </div>
+            ) : segments.length === 0 ? (
+              <div className="flex h-full min-h-[220px] items-center justify-center px-4">
+                <p className="text-[13px] text-muted-foreground">
+                  No transcript yet.
+                </p>
+              </div>
+            ) : (
+              segments.map((seg) => {
+                const key = speakerKey(seg.speaker);
+                const tone = toneFor(key, speakerKeys);
+                return (
+                  <button
+                    key={seg.id}
+                    id={`row-${seg.id}`}
+                    type="button"
+                    onClick={() => {
+                      setHighlightId(seg.id);
+                      if (seg.start != null) requestSeek(seg.start);
+                    }}
+                    className={cn(
+                      "grid w-full grid-cols-[48px_1fr] gap-2.5 border-l-2 px-4 py-2.5 text-left",
+                      tone.border,
+                      activeId === seg.id && "bg-brand-tint",
+                    )}
+                  >
+                    <div className="pt-0.5 font-mono text-[11px] text-muted-foreground">
+                      {seg.start != null ? formatDuration(seg.start) : "—"}
+                    </div>
+                    <div>
+                      <span
+                        className={cn(
+                          "mb-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
+                          tone.pill,
+                        )}
+                      >
+                        {prettySpeaker(key)}
+                      </span>
+                      <p className="mt-1 text-[13.5px] leading-normal">
+                        {seg.text}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+          {audioSrc ? (
+            <TranscriptPlayer
+              src={audioSrc}
+              duration={duration}
+              segments={segments}
+              seek={seek}
+              onActiveId={setActivePlayId}
+            />
+          ) : null}
+        </section>
+
+        <IntelPanel pending={pending} onEvidence={openEvidence} />
+      </div>
+
+      <EvidenceModal
+        evidence={evidence}
+        onClose={() => setEvidence(null)}
+        onJump={jumpToTranscript}
+      />
+      <ExportDialog
+        open={exportFormat !== null}
+        format={exportFormat ?? "markdown"}
+        fileBase={fileBase}
+        callLabel={call.label}
+        segments={segments}
+        pending={pending}
+        onOpenChange={(open) => {
+          if (!open) setExportFormat(null);
+        }}
+      />
+    </div>
+  );
+}
+
+function IntelPanel({
+  pending,
+  onEvidence,
+}: {
+  pending: boolean;
+  onEvidence: (segId: string, quote?: string) => void;
+}) {
+  return (
+    <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-background">
+      <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
+        <h3 className="text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase">
+          Intel
+        </h3>
+        <span
+          className={cn(
+            "font-mono text-[10.5px]",
+            pending ? "text-warning" : "text-muted-foreground",
+          )}
+        >
+          {pending ? "processing" : "shipped"}
+        </span>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+          Run status
+        </h4>
+        <p className="mb-4 flex items-center gap-1.5 text-[13px] font-medium">
+          <span
+            className={cn(
+              "size-[7px] rounded-full",
+              pending ? "animate-pulse bg-warning" : "bg-success",
+            )}
+          />
+          <span className={pending ? "text-warning" : undefined}>
+            {pending ? "Processing" : DEMO_INTEL.runStatus}
+          </span>
+        </p>
+
+        <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+          Summary
+        </h4>
+        <InsightCard
+          bar="bg-success"
+          title={DEMO_INTEL.summary.title}
+          desc={DEMO_INTEL.summary.desc}
+          segId={DEMO_INTEL.summary.segId}
+          quote={DEMO_INTEL.summary.quote}
+          onEvidence={onEvidence}
+        />
+
+        <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+          Objections
+        </h4>
+        <InsightCard
+          bar="bg-danger"
+          title={DEMO_INTEL.objection.title}
+          desc={DEMO_INTEL.objection.desc}
+          segId={DEMO_INTEL.objection.segId}
+          quote={DEMO_INTEL.objection.quote}
+          onEvidence={onEvidence}
+        />
+
+        <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+          Intent
+        </h4>
+        <InsightCard
+          bar="bg-brand"
+          title={DEMO_INTEL.intent.title}
+          segId={DEMO_INTEL.intent.segId}
+          quote={DEMO_INTEL.intent.quote}
+          onEvidence={onEvidence}
+        />
+
+        <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+          Next steps
+        </h4>
+        <ul>
+          {DEMO_INTEL.nextSteps.map((step) => (
+            <li
+              key={step.text}
+              className="flex items-center gap-2 border-b border-border py-2 text-[12.5px] last:border-b-0"
+            >
+              <Circle className="size-3 shrink-0 text-muted-foreground" />
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left hover:text-brand"
+                onClick={() => onEvidence(step.segId, step.quote)}
+              >
+                {step.text}
+                <ArrowUpRight className="ml-0.5 inline size-3 text-brand" />
+              </button>
+              <span className="shrink-0 font-mono text-[10px] text-muted-foreground uppercase">
+                {step.owner}
+              </span>
+            </li>
+          ))}
+        </ul>
+
+        <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+          Follow-up email
+        </h4>
+        <div className="rounded-md bg-muted px-3 py-2.5">
+          <p className="text-[12.5px] font-semibold">
+            {DEMO_INTEL.email.subject}
+          </p>
+          <p className="mt-1 text-[12.5px] text-ink-soft">
+            {DEMO_INTEL.email.body}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function InsightCard({
+  bar,
+  title,
+  desc,
+  segId,
+  quote,
+  onEvidence,
+}: {
+  bar: string;
+  title: string;
+  desc?: string;
+  segId: string;
+  quote?: string;
+  onEvidence: (segId: string, quote?: string) => void;
+}) {
+  return (
+    <div className="flex gap-2.5">
+      <div className={cn("w-0.5 shrink-0 self-stretch rounded-sm", bar)} />
+      <div className="min-w-0 flex-1 py-0.5">
+        <div className="text-[12.5px] font-semibold">{title}</div>
+        {desc ? (
+          <p className="mt-0.5 text-xs leading-snug text-ink-soft">{desc}</p>
+        ) : null}
+        <button
+          type="button"
+          className="mt-1.5 inline-flex items-center gap-0.5 font-mono text-[10.5px] text-brand hover:underline"
+          onClick={() => onEvidence(segId, quote)}
+        >
+          <ArrowUpRight className="size-3" />
+          {segId}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const EXPORT_SCOPES: { id: ExportScope; label: string }[] = [
+  { id: "transcript", label: "Transcript" },
+  { id: "intel", label: "Intel" },
+  { id: "both", label: "Both" },
+];
+
+function ExportDialog({
+  open,
+  format,
+  fileBase,
+  callLabel,
+  segments,
+  pending,
+  onOpenChange,
+}: {
+  open: boolean;
+  format: ExportFormat;
+  fileBase: string;
+  callLabel: string;
+  segments: TranscriptSegment[];
+  pending: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [scope, setScope] = useState<ExportScope>("both");
+
+  useEffect(() => {
+    if (open) setScope("both");
+  }, [open]);
+
+  function confirm() {
+    if (format === "json") {
+      downloadText(
+        `${fileBase}.json`,
+        JSON.stringify(toExportJson(scope, segments, pending), null, 2),
+        "application/json",
+      );
+    } else {
+      downloadText(
+        `${fileBase}.md`,
+        toExportMarkdown(callLabel, scope, segments, pending),
+        "text/markdown;charset=utf-8",
+      );
+    }
+    onOpenChange(false);
+  }
+
+  const formatLabel = format === "json" ? "JSON" : "Markdown";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[380px]">
+        <DialogHeader>
+          <DialogTitle>Export {formatLabel}</DialogTitle>
+          <DialogDescription>
+            Choose whether to include Transcript, Intel, or both.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex gap-2">
+          {EXPORT_SCOPES.map((item) => (
+            <Button
+              key={item.id}
+              type="button"
+              variant={scope === item.id ? "default" : "outline"}
+              className="flex-1"
+              onClick={() => setScope(item.id)}
+            >
+              {item.label}
+            </Button>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+          <Button type="button" onClick={confirm}>
+            Export
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EvidenceModal({
+  evidence,
+  onClose,
+  onJump,
+}: {
+  evidence: Evidence | null;
+  onClose: () => void;
+  onJump: () => void;
+}) {
+  return (
+    <Dialog
+      open={Boolean(evidence)}
+      onOpenChange={(open) => !open && onClose()}
+    >
+      <DialogContent className="sm:max-w-[360px]">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute top-3 left-3 size-2.5 border-t border-l border-muted-foreground/45"
+        />
+        <span
+          aria-hidden
+          className="pointer-events-none absolute right-3 bottom-3 size-2.5 border-r border-b border-muted-foreground/45"
+        />
+        <DialogHeader>
+          <DialogTitle className="font-mono text-[10.5px] font-normal tracking-[0.1em] text-muted-foreground uppercase">
+            Evidence
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            {evidence
+              ? `${evidence.speaker} at ${evidence.time}: ${evidence.quote}`
+              : "Transcript evidence"}
+          </DialogDescription>
+        </DialogHeader>
+        {evidence ? (
+          <div>
+            <div className="mb-2.5 flex justify-between font-mono text-xs text-ink-soft">
+              <span>{evidence.speaker}</span>
+              <span>{evidence.time}</span>
+            </div>
+            <p className="mb-1.5 text-[14.5px] leading-relaxed font-semibold">
+              {evidence.quote}
+            </p>
+            <p className="mb-4 font-mono text-[10.5px] text-muted-foreground">
+              {evidence.segId}
+            </p>
+            <Button
+              type="button"
+              className="w-full bg-brand text-white hover:bg-brand-hover"
+              onClick={onJump}
+            >
+              Jump to transcript
+            </Button>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TranscriptPlayer({
+  src,
+  duration,
+  segments,
+  seek,
+  onActiveId,
+}: {
+  src: string;
+  duration: number;
+  segments: TranscriptSegment[];
+  seek: { at: number; n: number } | null;
+  onActiveId: (id: string | null) => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const lastId = useRef<string | null>(null);
+  const segmentsRef = useRef(segments);
+  const [playing, setPlaying] = useState(false);
+  const [cursor, setCursor] = useState(0);
+  const [mediaDuration, setMediaDuration] = useState(0);
+  segmentsRef.current = segments;
+
+  const total = mediaDuration || duration || 0;
+  const pct = total ? Math.min(100, (cursor / total) * 100) : 0;
+
+  function emitActive(time: number) {
+    const next = segmentAtTime(segmentsRef.current, time)?.id ?? null;
+    if (next === lastId.current) return;
+    lastId.current = next;
+    onActiveId(next);
+  }
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.currentTime = 0;
+    lastId.current = null;
+    setPlaying(false);
+    setCursor(0);
+    setMediaDuration(0);
+    onActiveId(null);
+  }, [src, onActiveId]);
+
+  useEffect(() => {
+    if (!seek) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = seek.at;
+    setCursor(seek.at);
+    emitActive(seek.at);
+    void audio.play();
+  }, [seek]);
+
+  function toggle() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing) audio.pause();
+    else void audio.play();
+  }
+
+  function seekBar(event: MouseEvent<HTMLButtonElement>) {
+    if (!total) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const next = Math.min(
+      1,
+      Math.max(0, (event.clientX - rect.left) / rect.width),
+    );
+    const at = next * total;
+    const audio = audioRef.current;
+    if (audio) audio.currentTime = at;
+    setCursor(at);
+    emitActive(at);
+  }
+
+  return (
+    <div className="flex shrink-0 items-center gap-2.5 border-t border-border px-4 py-2.5">
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onPlay={() => {
+          setPlaying(true);
+          emitActive(audioRef.current?.currentTime ?? 0);
+        }}
+        onPause={() => setPlaying(false)}
+        onEnded={() => {
+          setPlaying(false);
+          lastId.current = null;
+          onActiveId(null);
+        }}
+        onLoadedMetadata={() => {
+          const audio = audioRef.current;
+          if (audio && Number.isFinite(audio.duration)) {
+            setMediaDuration(audio.duration);
+          }
+        }}
+        onTimeUpdate={() => {
+          const t = audioRef.current?.currentTime ?? 0;
+          setCursor(t);
+          emitActive(t);
+        }}
+      />
+      <button
+        type="button"
+        className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border hover:border-brand hover:text-brand"
+        onClick={toggle}
+        aria-label={playing ? "Pause" : "Play"}
+      >
+        {playing ? <Pause className="size-3" /> : <Play className="size-3" />}
+      </button>
+      <button
+        type="button"
+        className="relative h-7 flex-1 cursor-pointer"
+        onClick={seekBar}
+        aria-label="Seek"
+      >
+        <span className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-sm bg-border">
+          <span
+            className="absolute inset-y-0 left-0 rounded-sm bg-brand"
+            style={{ width: `${pct}%` }}
+          />
+        </span>
+      </button>
+      <span className="min-w-[88px] shrink-0 text-right font-mono text-[10.5px] text-muted-foreground">
+        {formatDuration(cursor)} / {formatDuration(total)}
+      </span>
+    </div>
+  );
+}

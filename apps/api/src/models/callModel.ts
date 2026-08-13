@@ -1,5 +1,8 @@
 import { query, queryOne } from "../config/database.js";
 
+export const CALL_STATUSES = ["queued", "PROCESSING", "PYAI_SUCCESS", "PYAI_FAILED"] as const;
+export type CallStatus = (typeof CALL_STATUSES)[number];
+
 export type CallRecord = {
   id: string;
   organization_id: string;
@@ -8,7 +11,7 @@ export type CallRecord = {
   label: string;
   filename: string | null;
   duration_seconds: number;
-  status: string;
+  status: CallStatus;
   storage_path: string | null;
   source_url: string | null;
   created_at: Date;
@@ -21,7 +24,7 @@ export type CallInsert = {
   label: string;
   filename?: string | null;
   durationSeconds?: number;
-  status?: string;
+  status?: CallStatus;
   storagePath?: string | null;
   sourceUrl?: string | null;
 };
@@ -77,7 +80,7 @@ export const CallModel = {
         input.label,
         input.filename ?? null,
         input.durationSeconds ?? 0,
-        input.status ?? "processing",
+        input.status ?? "PROCESSING",
         input.storagePath ?? null,
         input.sourceUrl ?? null,
       ],
@@ -88,7 +91,7 @@ export const CallModel = {
     return queryOne<CallRecord>("UPDATE calls SET deal_id = $2 WHERE id = $1 RETURNING *", [id, dealId]);
   },
 
-  updateStatus(id: string, status: string, durationSeconds?: number) {
+  updateStatus(id: string, status: CallStatus, durationSeconds?: number) {
     if (typeof durationSeconds === "number") {
       return queryOne<CallRecord>(
         "UPDATE calls SET status = $2, duration_seconds = $3 WHERE id = $1 RETURNING *",

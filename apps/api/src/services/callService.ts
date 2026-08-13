@@ -1,5 +1,17 @@
-import { basename } from "node:path";
+import { stat } from "node:fs/promises";
+import {
+  basename,
+  extname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { z } from "zod";
+import { audioMimeByExt, uploadRoot } from "../middleware/upload.js";
+import { existsSync } from "node:fs";
+import type { Request } from "express";
+import { env } from "../config/env.js";
 import { CallModel, type CallRecord } from "../models/callModel.js";
 import { DealModel, type DealRecord } from "../models/dealModel.js";
 import { UserDealModel } from "../models/userDealModel.js";
@@ -34,8 +46,74 @@ export const addDealUserSchema = z.object({
   userIds: z.array(z.string().uuid()).min(1).max(100),
 });
 
+const mimeByExt: Record<string, string> = {
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".m4a": "audio/mp4",
+  ".mp4": "video/mp4",
+  ".webm": "audio/webm",
+};
+
+export type PublicCall = Omit<CallRecord, "storage_path"> & {
+  fileUrl: string | null;
+};
+
+export function publicApiBase(req: Request): string {
+  if (env.API_PUBLIC_URL) {
+    return env.API_PUBLIC_URL;
+  }
+  const host = req.get("host") ?? `localhost:${env.API_PORT}`;
+  return `${req.protocol}://${host}`;
+}
+
+export function toPublicCall(call: CallRecord, apiBaseUrl: string): PublicCall {
+  const { storage_path: storagePath, ...rest } = call;
+  const base = apiBaseUrl.replace(/\/$/, "");
+  return {
+    ...rest,
+    fileUrl: storagePath
+      ? `${base}/api/calls/${call.id}/file`
+      : call.source_url,
+  };
+}
+
+function resolveStoredFile(storagePath: string): string {
+  const name = basename(storagePath);
+  if (!name || name !== storagePath.replaceAll("\\", "/").split("/").pop()) {
+    throw new HttpError(404, "Recording not found");
+  }
+  const absolutePath = resolve(uploadRoot, name);
+  const rel = relative(uploadRoot, absolutePath);
+  if (!rel || rel.startsWith("..") || rel.includes(`..${sep}`)) {
+    throw new HttpError(404, "Recording not found");
+  }
+  if (!existsSync(absolutePath)) {
+    throw new HttpError(404, "Recording not found");
+  }
+  return absolutePath;
+}
+
+function sanitizeDownloadName(raw: string | null, fallback: string): string {
+  const base = basename(raw || fallback).replace(/[^\w.\-]+/g, "_");
+  return base.slice(0, 120) || "recording";
+}
+
 function sanitizeLabel(raw: string) {
   return raw.replace(/[<>]/g, "").trim().slice(0, 200);
+}
+
+function safeUploadPath(storedName: string) {
+  const name = basename(storedName);
+  if (!name || name === "." || name === "..") {
+    throw new HttpError(404, "Recording not found");
+  }
+  const root = resolve(uploadRoot);
+  const abs = resolve(root, name);
+  const rel = relative(root, abs);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new HttpError(404, "Recording not found");
+  }
+  return abs;
 }
 
 async function loadActor(userId: string): Promise<UserRecord> {
@@ -46,11 +124,17 @@ async function loadActor(userId: string): Promise<UserRecord> {
   return user;
 }
 
-function sameOrg(actor: UserRecord, organizationId: string | null | undefined): boolean {
+function sameOrg(
+  actor: UserRecord,
+  organizationId: string | null | undefined,
+): boolean {
   return Boolean(organizationId) && actor.organization_id === organizationId;
 }
 
-async function assertDealAccess(actor: UserRecord, dealId: string): Promise<DealRecord> {
+async function assertDealAccess(
+  actor: UserRecord,
+  dealId: string,
+): Promise<DealRecord> {
   uuid.parse(dealId);
   const deal = await DealModel.findById(dealId);
   if (!deal || !sameOrg(actor, deal.organization_id)) {
@@ -66,7 +150,10 @@ async function assertDealAccess(actor: UserRecord, dealId: string): Promise<Deal
   return deal;
 }
 
-async function assertCanAssignDeal(actor: UserRecord, dealId: string | null | undefined) {
+async function assertCanAssignDeal(
+  actor: UserRecord,
+  dealId: string | null | undefined,
+) {
   if (!dealId) return;
   uuid.parse(dealId);
   const deal = await DealModel.findById(dealId);
@@ -107,7 +194,8 @@ async function assertCallAccess(actor: UserRecord, call: CallRecord) {
 
 function startTranscription(callId: string) {
   void TranscriptionService.transcribeCall(callId).catch((error) => {
-    const message = error instanceof Error ? error.message : "Transcription failed";
+    const message =
+      error instanceof Error ? error.message : "Transcription failed";
     console.error("Transcription failed:", message);
   });
 }
@@ -127,7 +215,7 @@ export const CallService = {
     return CallModel.listByDeal(dealId, actor.organization_id);
   },
 
-  async get(actorId: string, id: string) {
+  async requireCall(actorId: string, id: string) {
     uuid.parse(id);
     const actor = await loadActor(actorId);
     const call = await CallModel.findById(id);
@@ -135,8 +223,36 @@ export const CallService = {
       throw new HttpError(404, "Call not found");
     }
     await assertCallAccess(actor, call);
+    return call;
+  },
+
+  async get(actorId: string, id: string) {
+    const call = await CallService.requireCall(actorId, id);
     const transcriptions = await TranscriptionService.listForCall(id);
     return { call, transcriptions };
+  },
+
+  async audioFile(actorId: string, id: string) {
+    const call = await CallService.requireCall(actorId, id);
+    if (!call.storage_path) {
+      throw new HttpError(404, "No uploaded recording");
+    }
+    const abs = safeUploadPath(call.storage_path);
+    let fileStat;
+    try {
+      fileStat = await stat(abs);
+    } catch {
+      throw new HttpError(404, "Recording not found");
+    }
+    if (!fileStat.isFile()) {
+      throw new HttpError(404, "Recording not found");
+    }
+    const ext = extname(abs).toLowerCase();
+    const mime = audioMimeByExt[ext] ?? "application/octet-stream";
+    const rawName = basename(call.filename || `recording${ext || ".bin"}`);
+    const downloadName =
+      rawName.replace(/[^\w.\-]+/g, "_").slice(0, 120) || `recording${ext}`;
+    return { abs, size: fileStat.size, mime, downloadName };
   },
 
   async mapDeal(actorId: string, id: string, dealId: string | null) {
@@ -165,7 +281,8 @@ export const CallService = {
     await assertCanAssignDeal(actor, input.dealId);
 
     const filename = basename(input.originalName);
-    const label = sanitizeLabel(filename.replace(/\.[^/.]+$/, "")) || "Uploaded call";
+    const label =
+      sanitizeLabel(filename.replace(/\.[^/.]+$/, "")) || "Uploaded call";
 
     const call = await CallModel.create({
       organizationId: actor.organization_id,
@@ -174,7 +291,7 @@ export const CallService = {
       label,
       filename,
       storagePath: input.storedName,
-      status: "processing",
+      status: "PROCESSING",
     });
 
     if (!call) {
@@ -185,7 +302,29 @@ export const CallService = {
     return call;
   },
 
-  async createFromLink(input: z.infer<typeof linkCallSchema> & { uploadedBy: string }) {
+  async recordingFile(actorId: string, id: string) {
+    uuid.parse(id);
+    const actor = await loadActor(actorId);
+    const call = await CallModel.findById(id);
+    if (!call) {
+      throw new HttpError(404, "Call not found");
+    }
+    await assertCallAccess(actor, call);
+    if (!call.storage_path) {
+      throw new HttpError(404, "Recording not found");
+    }
+    const absolutePath = resolveStoredFile(call.storage_path);
+    const ext = extname(call.filename || call.storage_path).toLowerCase();
+    return {
+      absolutePath,
+      mimeType: mimeByExt[ext] ?? "application/octet-stream",
+      downloadName: sanitizeDownloadName(call.filename, call.storage_path),
+    };
+  },
+
+  async createFromLink(
+    input: z.infer<typeof linkCallSchema> & { uploadedBy: string },
+  ) {
     const actor = await loadActor(input.uploadedBy);
     await assertCanAssignDeal(actor, input.dealId);
 
@@ -199,7 +338,7 @@ export const CallService = {
       label,
       filename: input.url,
       sourceUrl: input.url,
-      status: "processing",
+      status: "PROCESSING",
     });
   },
 };
@@ -254,7 +393,10 @@ export const DealService = {
     }
 
     const targets = await UserModel.findByIds(uniqueIds);
-    if (targets.length !== uniqueIds.length || targets.some((target) => !sameOrg(actor, target.organization_id))) {
+    if (
+      targets.length !== uniqueIds.length ||
+      targets.some((target) => !sameOrg(actor, target.organization_id))
+    ) {
       throw new HttpError(400, "User not found");
     }
 

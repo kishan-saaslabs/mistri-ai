@@ -132,8 +132,14 @@ export const openApiSpec = {
           label: { type: "string" },
           filename: { type: "string", nullable: true },
           duration_seconds: { type: "integer" },
-          status: { type: "string", enum: ["queued", "processing", "ready", "failed"] },
-          storage_path: { type: "string", nullable: true },
+          status: { type: "string", enum: ["queued", "PROCESSING", "PYAI_SUCCESS", "PYAI_FAILED"] },
+          fileUrl: {
+            type: "string",
+            format: "uri",
+            nullable: true,
+            description:
+              "Absolute URL to play the recording. Uploaded files are served at GET /api/calls/{id}/file (auth required). Linked calls use source_url.",
+          },
           source_url: { type: "string", nullable: true },
           created_at: { type: "string", format: "date-time" },
         },
@@ -157,7 +163,18 @@ export const openApiSpec = {
           call_id: { type: "string", format: "uuid" },
           provider: { type: "string", example: "pyai" },
           model: { type: "string", example: "pyai-hear-telephony" },
-          status: { type: "string", enum: ["processing", "ready", "failed"] },
+          status: {
+            type: "string",
+            enum: [
+              "PROCESSING",
+              "PYAI_TRANSCRIBING",
+              "PYAI_SUCCESS",
+              "PYAI_FAILED",
+              "LLM_TRANSCRIBING",
+              "LLM_SUCCESS",
+              "LLM_FAILED",
+            ],
+          },
           language: { type: "string", nullable: true },
           duration_seconds: { type: "number", nullable: true },
           full_text: { type: "string", nullable: true },
@@ -168,6 +185,53 @@ export const openApiSpec = {
           error: { type: "string", nullable: true },
           created_at: { type: "string", format: "date-time" },
           updated_at: { type: "string", format: "date-time" },
+        },
+      },
+      InferredSpeaker: {
+        type: "object",
+        required: ["label", "suggestedName", "confidence", "evidence"],
+        properties: {
+          label: { type: "string", example: "speaker_1" },
+          suggestedName: { type: "string", example: "Nick" },
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+          evidence: { type: "string", description: "Short quote or reason from the transcript" },
+        },
+      },
+      NamedTranscriptSegment: {
+        type: "object",
+        required: ["id", "type", "text", "speakerName"],
+        properties: {
+          id: { type: "string", example: "seg_1" },
+          type: { type: "string", enum: ["final", "partial"] },
+          start: { type: "number", nullable: true, description: "Start time in seconds" },
+          end: { type: "number", nullable: true, description: "End time in seconds" },
+          speaker: { type: "string", nullable: true, description: "Diarized speaker label from PyAI Hear Telephony (e.g. speaker_0)" },
+          text: { type: "string" },
+          speakerName: {
+            type: "string",
+            description: "Resolved display name, or the raw speaker label / \"Unknown Speaker\" when unresolved",
+          },
+        },
+      },
+      InferAndRenameResponse: {
+        type: "object",
+        required: ["inferred", "transcript", "readable"],
+        properties: {
+          inferred: {
+            type: "array",
+            items: { $ref: "#/components/schemas/InferredSpeaker" },
+            description: "Suggestions only, not final answers — confirm with a human before committing to a name",
+          },
+          transcript: {
+            type: "array",
+            items: { $ref: "#/components/schemas/NamedTranscriptSegment" },
+          },
+          readable: { type: "string", description: "Flattened \"SpeakerName: text\" lines" },
+          reason: {
+            type: "string",
+            description:
+              "Present only when inference was short-circuited, e.g. no diarization data or no segments — inferred is [] in that case",
+          },
         },
       },
       LinkCallRequest: {
@@ -550,7 +614,7 @@ export const openApiSpec = {
         tags: ["Calls"],
         summary: "Upload a recording",
         description:
-          "Multipart upload. Field name must be `file`. Optional `dealId`. Transcription runs in the background via PyAI Hear. Poll GET /api/calls/{id} until status is ready.",
+          "Multipart upload. Field name must be `file`. Optional `dealId`. Transcription runs in the background via PyAI Hear. Poll GET /api/calls/{id} until the transcription status is PYAI_SUCCESS or PYAI_FAILED.",
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -617,6 +681,30 @@ export const openApiSpec = {
         },
       },
     },
+    "/api/calls/{id}/file": {
+      get: {
+        tags: ["Calls"],
+        summary: "Play or download the uploaded recording",
+        description:
+          "Streams the stored file with Range support. Requires the same access as GET /api/calls/{id}. Use the `fileUrl` on the call object as an absolute URL.",
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+        parameters: [{ $ref: "#/components/parameters/UuidId" }],
+        responses: {
+          "200": {
+            description: "Audio or video bytes",
+            content: {
+              "audio/mpeg": { schema: { type: "string", format: "binary" } },
+              "audio/wav": { schema: { type: "string", format: "binary" } },
+              "audio/mp4": { schema: { type: "string", format: "binary" } },
+              "video/mp4": { schema: { type: "string", format: "binary" } },
+            },
+          },
+          "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to access this call" },
+          "404": { description: "Call or recording file not found" },
+        },
+      },
+    },
     "/api/calls/{id}": {
       get: {
         tags: ["Calls"],
@@ -671,6 +759,32 @@ export const openApiSpec = {
           "401": { description: "Authentication required" },
           "403": { description: "Not allowed to map this call or target deal" },
           "404": { description: "Call not found" },
+        },
+      },
+    },
+    "/api/calls/{id}/audio": {
+      get: {
+        tags: ["Calls"],
+        summary: "Stream the uploaded recording",
+        description:
+          "Authenticated download of the stored file. Supports HTTP Range. Calls that only have a source URL (no upload) return 404 — play `source_url` on the client instead.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: "#/components/parameters/UuidId" }],
+        responses: {
+          "200": {
+            description: "Full recording",
+            content: {
+              "audio/mpeg": { schema: { type: "string", format: "binary" } },
+              "audio/wav": { schema: { type: "string", format: "binary" } },
+              "audio/mp4": { schema: { type: "string", format: "binary" } },
+              "video/mp4": { schema: { type: "string", format: "binary" } },
+            },
+          },
+          "206": { description: "Partial content" },
+          "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to access this call" },
+          "404": { description: "Call or recording not found" },
+          "416": { description: "Invalid Range" },
         },
       },
     },
@@ -732,6 +846,37 @@ export const openApiSpec = {
           "401": { description: "Authentication required" },
           "403": { description: "Not allowed to access this call" },
           "404": { description: "Call not found" },
+        },
+      },
+    },
+    "/api/calls/{id}/infer-and-rename": {
+      post: {
+        tags: ["Transcriptions"],
+        summary: "Queue LLM speaker-name inference for a call's transcription",
+        description:
+          "Enqueues a BullMQ job (queue: infer-and-rename) that infers a real name per diarized speaker label from the call's most recent ready transcription, via an OpenAI-compatible LLM (see apps/ai). Processing happens asynchronously in a worker within the apps/api process, not on this request — this endpoint only validates and enqueues, then returns immediately. Results (suggestions with confidence/evidence, not final answers) are upserted into call_transcripts keyed by transcription_id once the job completes; there is currently no GET endpoint to poll that result over HTTP.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: "#/components/parameters/UuidId" }],
+        responses: {
+          "202": {
+            description: "Job queued",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    status: { type: "string", example: "queued" },
+                    transcriptionId: { type: "string", format: "uuid" },
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "Call has no transcription to infer speakers from" },
+          "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to access this call" },
+          "404": { description: "Call not found" },
+          "409": { description: "Transcription is not ready yet" },
         },
       },
     },
