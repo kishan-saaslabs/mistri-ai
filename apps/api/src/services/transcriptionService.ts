@@ -36,6 +36,7 @@ export const TranscriptionService = {
         absolutePath: resolve(uploadRoot, call.storage_path),
         filename,
         mimeType: mimeByExt[ext] ?? "application/octet-stream",
+        audioUrl: call.source_url && /^https?:\/\//i.test(call.source_url) ? call.source_url : undefined,
       });
 
       const saved = await TranscriptionModel.markReady(row.id, {

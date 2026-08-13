@@ -33,7 +33,7 @@ export const TranscriptionModel = {
       `INSERT INTO transcriptions (call_id, provider, model, status, segments)
        VALUES ($1, $2, $3, 'processing', '[]'::jsonb)
        RETURNING *`,
-      [input.callId, input.provider ?? "pyai", input.model ?? "pyai-hear"],
+      [input.callId, input.provider ?? "pyai", input.model ?? "pyai-hear-telephony"],
     );
   },
 

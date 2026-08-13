@@ -13,7 +13,7 @@ export const openApiSpec = {
     { name: "Auth", description: "Register, login, and current user" },
     { name: "Deals", description: "Deal records. One deal can have many calls." },
     { name: "Calls", description: "Call recordings and deal mapping" },
-    { name: "Transcriptions", description: "PyAI Hear segments stored as a JSON array of objects" },
+    { name: "Transcriptions", description: "PyAI Hear Telephony batch jobs with diarized speaker segments" },
   ],
   components: {
     securitySchemes: {
@@ -123,7 +123,7 @@ export const openApiSpec = {
           type: { type: "string", enum: ["final", "partial"] },
           start: { type: "number", nullable: true, description: "Start time in seconds" },
           end: { type: "number", nullable: true, description: "End time in seconds" },
-          speaker: { type: "string", nullable: true },
+          speaker: { type: "string", nullable: true, description: "Diarized speaker label from PyAI Hear Telephony (e.g. speaker_0)" },
           text: { type: "string" },
         },
       },
@@ -133,7 +133,7 @@ export const openApiSpec = {
           id: { type: "string", format: "uuid" },
           call_id: { type: "string", format: "uuid" },
           provider: { type: "string", example: "pyai" },
-          model: { type: "string", example: "pyai-hear" },
+          model: { type: "string", example: "pyai-hear-telephony" },
           status: { type: "string", enum: ["processing", "ready", "failed"] },
           language: { type: "string", nullable: true },
           duration_seconds: { type: "number", nullable: true },
