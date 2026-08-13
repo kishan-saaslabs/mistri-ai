@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
+import { useQueries } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MorphFrame, SkeletonLine } from "@/components/ui/skeleton";
 import { ApiError, dealsApi } from "@/lib/api";
+import { queryKeys } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import type { DealsOutletContext } from "@/components/deals/DealsLayout";
 
 const SUGGESTIONS = ["Acme Corp", "Northwind", "Brightline", "Vertex Systems"];
-
-type DealMeta = { callCount: number };
 
 export function DealsView() {
   const navigate = useNavigate();
@@ -19,37 +20,22 @@ export function DealsView() {
 
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
-  const [meta, setMeta] = useState<Record<string, DealMeta>>({});
-  const [metaLoading, setMetaLoading] = useState(false);
 
-  useEffect(() => {
-    if (deals.length === 0) {
-      setMeta({});
-      return;
-    }
-    let active = true;
-    setMetaLoading(true);
-    Promise.all(
-      deals.map(async (deal) => {
-        const calls = await dealsApi.calls(deal.id).catch(() => []);
-        return [deal.id, { callCount: calls.length }] as const;
-      }),
-    ).then((entries) => {
-      if (!active) return;
-      setMeta(Object.fromEntries(entries));
-      setMetaLoading(false);
-    });
-    return () => {
-      active = false;
-    };
-  }, [deals]);
-
+  const callQueries = useQueries({
+    queries: deals.map((deal) => ({
+      queryKey: queryKeys.dealCalls(deal.id),
+      queryFn: () => dealsApi.calls(deal.id),
+    })),
+  });
+  const metaLoading = callQueries.some((q) => q.isPending);
   const totals = useMemo(() => {
-    const entries = Object.values(meta);
-    const calls = entries.reduce((sum, m) => sum + m.callCount, 0);
-    const empty = entries.filter((m) => m.callCount === 0).length;
+    const calls = callQueries.reduce(
+      (sum, q) => sum + (q.data?.length ?? 0),
+      0,
+    );
+    const empty = callQueries.filter((q) => q.data && q.data.length === 0).length;
     return { calls, empty };
-  }, [meta]);
+  }, [callQueries]);
 
   async function submit(event?: FormEvent) {
     event?.preventDefault();
@@ -70,10 +56,27 @@ export function DealsView() {
     }
   }
 
-  if (loading) {
+  if (loading && deals.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      <div className="mx-auto w-full max-w-[760px] px-7 pt-8 pb-[60px]">
+        <h1 className="text-[22px] font-semibold tracking-tight">
+          <SkeletonLine className="w-36" />
+        </h1>
+        <p className="mt-0.5 text-[13px]">
+          <SkeletonLine className="w-64" />
+        </p>
+        <div className="mt-5 grid grid-cols-3 gap-3">
+          {["Deals", "Total calls", "Empty deals"].map((label) => (
+            <div key={label} className="rounded-xl border border-border px-4 py-3">
+              <div className="font-mono text-[9.5px] tracking-[0.1em] text-muted-foreground uppercase">
+                {label}
+              </div>
+              <div className="mt-1 h-[26px] min-w-10 rounded-md text-[22px] leading-none font-semibold">
+                <span className="inline-block h-full w-10 animate-pulse rounded-md bg-muted" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -164,18 +167,15 @@ function Kpi({
       <div className="font-mono text-[9.5px] tracking-[0.1em] text-muted-foreground uppercase">
         {label}
       </div>
-      <div
+      <MorphFrame
+        loading={Boolean(loading)}
         className={cn(
-          "mt-1 text-[22px] font-semibold tabular-nums",
-          muted && value > 0 && "text-warning",
+          "mt-1 h-[26px] min-w-10 rounded-md text-[22px] leading-none font-semibold tabular-nums",
+          muted && !loading && value > 0 && "text-warning",
         )}
       >
-        {loading ? (
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
-        ) : (
-          value
-        )}
-      </div>
+        {value}
+      </MorphFrame>
     </div>
   );
 }

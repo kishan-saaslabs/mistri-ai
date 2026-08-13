@@ -11,7 +11,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ApiError, callsApi } from "@/lib/api";
+import { ApiError, callsApi, type Call } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const ACCEPT = ".mp3,.mp4,.wav,.m4a,audio/*,video/mp4";
@@ -25,7 +25,7 @@ export function AddCallDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   dealId: string;
-  onAdded: () => void;
+  onAdded: (call: Call) => void;
 }) {
   const [mode, setMode] = useState<"file" | "link">("file");
   const [file, setFile] = useState<File | null>(null);
@@ -70,7 +70,7 @@ export function AddCallDialog({
               ...(label.trim() ? { label: label.trim() } : {}),
             });
       toast.success(`“${call.label}” added to this deal.`);
-      onAdded();
+      onAdded(call);
       onOpenChange(false);
     } catch (err) {
       toast.error(

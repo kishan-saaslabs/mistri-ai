@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { Diamond, Loader2, LogOut, MessageCircleQuestion, Users } from "lucide-react";
+import { Handshake, Loader2, LogOut, Sparkles, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -25,12 +25,18 @@ function initialsOf(name: string) {
 }
 
 const nav = [
-  { to: "/deals", label: "Deals", icon: Diamond },
+  { to: "/deals", label: "Deals", icon: Handshake },
   { to: "/team", label: "Team", icon: Users },
-  { to: "/ask", label: "Ask Mistri", icon: MessageCircleQuestion },
+  { to: "/ask", label: "Ask Mistri", icon: Sparkles },
 ];
 
-export function Sidebar() {
+function SidebarBody({
+  onNavigate,
+  onClose,
+}: {
+  onNavigate?: () => void;
+  onClose?: () => void;
+}) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -54,12 +60,24 @@ export function Sidebar() {
     : "";
 
   return (
-    <aside className="hidden h-full w-[232px] shrink-0 flex-col border-r border-border bg-sidebar px-3 py-4 text-ink-soft md:flex">
+    <>
       <div className="mb-5 flex items-center gap-2.5 px-2 pt-1">
         <div className="flex size-[26px] shrink-0 items-center justify-center rounded-md bg-foreground text-[12.5px] font-bold text-background">
           M
         </div>
-        <div className="text-[14.5px] font-semibold tracking-tight text-foreground">Mistri AI</div>
+        <div className="min-w-0 flex-1 text-[14.5px] font-semibold tracking-tight text-foreground">
+          Mistri AI
+        </div>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close menu"
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <X className="size-3.5" />
+          </button>
+        ) : null}
       </div>
 
       <nav className="mb-4 space-y-px">
@@ -67,6 +85,7 @@ export function Sidebar() {
           <NavLink
             key={item.to}
             to={item.to}
+            onClick={onNavigate}
             className={({ isActive }) => {
               const active =
                 item.to === "/deals"
@@ -145,6 +164,71 @@ export function Sidebar() {
           </div>
         </DialogContent>
       </Dialog>
-    </aside>
+    </>
+  );
+}
+
+const panelClass =
+  "flex h-full w-[232px] shrink-0 flex-col border-r border-border bg-sidebar px-3 py-4 text-ink-soft";
+
+export function Sidebar({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    onOpenChange(false);
+  }, [pathname, onOpenChange]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onOpenChange(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onOpenChange]);
+
+  return (
+    <>
+      <aside className={cn("hidden md:flex", panelClass)}>
+        <SidebarBody />
+      </aside>
+
+      <div
+        className={cn(
+          "fixed inset-0 z-50 md:hidden",
+          !open && "pointer-events-none",
+        )}
+      >
+        <button
+          type="button"
+          tabIndex={open ? 0 : -1}
+          aria-label="Close menu"
+          className={cn(
+            "absolute inset-0 bg-black/40 transition-opacity duration-300",
+            open ? "opacity-100" : "opacity-0",
+          )}
+          onClick={() => onOpenChange(false)}
+        />
+        <aside
+          id="mobile-sidebar"
+          className={cn(
+            panelClass,
+            "relative max-w-[85vw] transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+            open ? "translate-x-0" : "-translate-x-full",
+          )}
+        >
+          <SidebarBody
+            onNavigate={() => onOpenChange(false)}
+            onClose={() => onOpenChange(false)}
+          />
+        </aside>
+      </div>
+    </>
   );
 }

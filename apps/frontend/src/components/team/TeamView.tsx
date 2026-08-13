@@ -1,19 +1,25 @@
 import { useState } from "react";
-import { Loader2, UserPlus } from "lucide-react";
+import { UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { MorphIn, SkeletonLine } from "@/components/ui/skeleton";
 import { AddTeamMemberDialog } from "@/components/team/AddTeamMemberDialog";
 import { usersApi, type AuthUser } from "@/lib/api";
 import { formatDate, initialsOf, roleLabel } from "@/lib/display";
-import { useAsyncData } from "@/lib/useAsyncData";
+import { queryErrorMessage, queryKeys } from "@/lib/query";
 import { useAuth } from "@/state/auth";
 import { cn } from "@/lib/utils";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export function TeamView() {
   const { user } = useAuth();
-  const { data, loading, error, refetch } = useAsyncData<AuthUser[]>(
-    () => usersApi.list(),
-    [],
-  );
+  const queryClient = useQueryClient();
+  const usersQuery = useQuery({
+    queryKey: queryKeys.users,
+    queryFn: usersApi.list,
+  });
+  const data = usersQuery.data;
+  const loading = usersQuery.isPending;
+  const error = usersQuery.error ? queryErrorMessage(usersQuery.error) : null;
   const [addOpen, setAddOpen] = useState(false);
 
   const canManage = user?.role === "OWNER" || user?.role === "ADMIN";
@@ -40,18 +46,44 @@ export function TeamView() {
       </p>
 
       {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="size-5 animate-spin text-muted-foreground" />
+        <div className="overflow-hidden rounded-lg border border-border">
+          {Array.from({ length: 5 }, (_, i) => (
+            <div
+              key={i}
+              className={cn(
+                "flex items-center gap-3 px-4 py-2.5",
+                i !== 4 && "border-b border-border",
+              )}
+            >
+              <span className="size-8 shrink-0 animate-pulse rounded-[6px] border border-border bg-muted" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-medium">
+                  <SkeletonLine className="w-[36%]" />
+                </div>
+                <div className="truncate font-mono text-[10.5px]">
+                  <SkeletonLine className="w-[58%]" />
+                </div>
+              </div>
+              <span className="shrink-0 animate-pulse rounded-full border border-border bg-muted px-2 py-0.5 font-mono text-[10px] text-transparent">
+                Member
+              </span>
+            </div>
+          ))}
         </div>
       ) : error ? (
         <div className="py-16 text-center">
           <p className="mb-3 text-[13px] text-muted-foreground">{error}</p>
-          <Button type="button" variant="outline" size="sm" onClick={refetch}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void usersQuery.refetch()}
+          >
             Try again
           </Button>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
+        <MorphIn className="overflow-hidden rounded-lg border border-border">
           {members.map((member, i) => (
             <div
               key={member.id}
@@ -81,14 +113,18 @@ export function TeamView() {
               </span>
             </div>
           ))}
-        </div>
+        </MorphIn>
       )}
 
       <AddTeamMemberDialog
         open={addOpen}
         onOpenChange={setAddOpen}
         allowOwner={user?.role === "OWNER"}
-        onCreated={refetch}
+        onCreated={(created) => {
+          queryClient.setQueryData<AuthUser[]>(queryKeys.users, (prev) =>
+            prev ? [...prev, created] : [created],
+          );
+        }}
       />
     </div>
   );

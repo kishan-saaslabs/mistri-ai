@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
+import { applyThemeTransition, originFromElement } from "@/lib/themeTransition";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,7 +23,13 @@ export function ThemeToggle({ className }: { className?: string }) {
       type="button"
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
       title="Toggle theme"
-      onClick={() => setTheme(isDark ? "light" : "dark")}
+      onClick={(event) =>
+        applyThemeTransition(
+          isDark ? "light" : "dark",
+          setTheme,
+          originFromElement(event.currentTarget),
+        )
+      }
       className={cn(
         "flex size-6 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
         className,

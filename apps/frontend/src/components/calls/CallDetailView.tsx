@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowUpRight,
   ChevronDown,
   Circle,
-  Loader2,
+  FileDown,
   Pause,
   Play,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { MorphIn, SkeletonLine } from "@/components/ui/skeleton";
 import {
   Dialog,
   DialogContent,
@@ -25,7 +27,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { formatDuration } from "@/lib/format";
 import {
-  ApiError,
   callsApi,
   isFailedStatus,
   isPendingStatus,
@@ -34,6 +35,7 @@ import {
   type TranscriptSegment,
   type Transcription,
 } from "@/lib/api";
+import { queryErrorMessage, queryKeys } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import type { DealsOutletContext } from "@/components/deals/DealsLayout";
 
@@ -169,6 +171,12 @@ function segmentAtTime(segments: TranscriptSegment[], time: number) {
     }
   }
   return current;
+}
+
+function segmentEnd(seg: TranscriptSegment, segments: TranscriptSegment[]) {
+  if (seg.end != null) return seg.end;
+  const index = segments.findIndex((row) => row.id === seg.id);
+  return index >= 0 ? (segments[index + 1]?.start ?? null) : null;
 }
 
 type Evidence = {
@@ -324,41 +332,25 @@ function toExportMarkdown(
 export function CallDetailView() {
   const { id = "" } = useParams();
   const { setActiveDealId } = useOutletContext<DealsOutletContext>();
-  const [data, setData] = useState<CallDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [nonce, setNonce] = useState(0);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [activePlayId, setActivePlayId] = useState<string | null>(null);
   const [evidence, setEvidence] = useState<Evidence | null>(null);
-  const [seek, setSeek] = useState<{ at: number; n: number } | null>(null);
+  const [seek, setSeek] = useState<{
+    at: number;
+    until: number | null;
+    n: number;
+  } | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    callsApi
-      .get(id)
-      .then((next) => {
-        if (!active) return;
-        setData(next);
-        setError(null);
-      })
-      .catch((err) => {
-        if (!active) return;
-        setData(null);
-        setError(
-          err instanceof ApiError
-            ? err.message
-            : "Something went wrong. Please try again.",
-        );
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [id, nonce]);
+  const callQuery = useQuery({
+    queryKey: queryKeys.call(id),
+    queryFn: () => callsApi.get(id),
+    enabled: Boolean(id),
+    refetchInterval: (q) =>
+      q.state.data && isPending(q.state.data) ? POLL_MS : false,
+  });
+  const data = callQuery.data ?? null;
+  const loading = callQuery.isPending;
+  const error = callQuery.error ? queryErrorMessage(callQuery.error) : null;
 
   useEffect(() => {
     setActiveDealId(data?.call.deal_id ?? null);
@@ -366,24 +358,6 @@ export function CallDetailView() {
   }, [data?.call.deal_id, setActiveDealId]);
 
   const pending = data ? isPending(data) : false;
-  useEffect(() => {
-    if (!pending) return;
-    let active = true;
-    const timer = window.setInterval(() => {
-      callsApi
-        .get(id)
-        .then((next) => {
-          if (active) setData(next);
-        })
-        .catch(() => {
-          // Keep the last successful payload while a poll fails.
-        });
-    }, POLL_MS);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [pending, id]);
 
   const transcription = data ? latestTranscription(data.transcriptions) : null;
   const segments = useMemo(
@@ -406,8 +380,8 @@ export function CallDetailView() {
       ?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [activePlayId]);
 
-  function requestSeek(at: number) {
-    setSeek((prev) => ({ at, n: (prev?.n ?? 0) + 1 }));
+  function requestSeek(at: number, until: number | null = null) {
+    setSeek((prev) => ({ at, until, n: (prev?.n ?? 0) + 1 }));
   }
 
   function openEvidence(segId: string, fallbackQuote?: string) {
@@ -435,15 +409,13 @@ export function CallDetailView() {
     if (!targetId) return;
     setHighlightId(targetId);
     const target = segments.find((seg) => seg.id === targetId);
-    if (target?.start != null) requestSeek(target.start);
+    if (target?.start != null) {
+      requestSeek(target.start, segmentEnd(target, segments));
+    }
   }
 
   if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="size-5 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <CallDetailSkeleton />;
   }
 
   if (error || !data) {
@@ -460,7 +432,7 @@ export function CallDetailView() {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setNonce((n) => n + 1)}
+            onClick={() => void callQuery.refetch()}
           >
             Try again
           </Button>
@@ -504,20 +476,9 @@ export function CallDetailView() {
             <p className="font-mono text-[11.5px] text-muted-foreground">
               {shortId(call.id)} · {modelLabel(transcription?.model)} ·{" "}
               {formatDuration(duration)} · {segments.length} line
-              {segments.length === 1 ? "" : "s"} · {speakerKeys.length} speaker
-              {speakerKeys.length === 1 ? "" : "s"}
+              {segments.length === 1 ? "" : "s"} ({speakerKeys.length} speaker
+              {speakerKeys.length === 1 ? "" : "s"})
             </p>
-            {speakerKeys.map((key) => (
-              <span
-                key={key}
-                className={cn(
-                  "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
-                  toneFor(key, speakerKeys).pill,
-                )}
-              >
-                {prettySpeaker(key)}
-              </span>
-            ))}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -557,11 +518,10 @@ export function CallDetailView() {
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {pending && segments.length === 0 ? (
-              <div className="flex h-full min-h-[220px] flex-col items-center justify-center gap-2 bg-warning-tint/70 px-4">
-                <Loader2 className="size-4 animate-spin text-warning" />
-                <p className="text-[13px] font-medium text-warning">
-                  Transcribing…
-                </p>
+              <div className="min-h-[220px]">
+                {Array.from({ length: 6 }, (_, i) => (
+                  <TranscriptRowSkeleton key={i} />
+                ))}
               </div>
             ) : failed && segments.length === 0 ? (
               <div className="flex h-full min-h-[220px] flex-col items-center justify-center px-4 text-center">
@@ -578,7 +538,8 @@ export function CallDetailView() {
                 </p>
               </div>
             ) : (
-              segments.map((seg) => {
+              <MorphIn>
+                {segments.map((seg) => {
                 const key = speakerKey(seg.speaker);
                 const tone = toneFor(key, speakerKeys);
                 return (
@@ -588,7 +549,9 @@ export function CallDetailView() {
                     type="button"
                     onClick={() => {
                       setHighlightId(seg.id);
-                      if (seg.start != null) requestSeek(seg.start);
+                      if (seg.start != null) {
+                        requestSeek(seg.start, segmentEnd(seg, segments));
+                      }
                     }}
                     className={cn(
                       "grid w-full grid-cols-[48px_1fr] gap-2.5 border-l-2 px-4 py-2.5 text-left",
@@ -614,7 +577,8 @@ export function CallDetailView() {
                     </div>
                   </button>
                 );
-              })
+                })}
+              </MorphIn>
             )}
           </div>
           {audioSrc ? (
@@ -636,6 +600,128 @@ export function CallDetailView() {
         onClose={() => setEvidence(null)}
         onJump={jumpToTranscript}
       />
+    </div>
+  );
+}
+
+function TranscriptRowSkeleton() {
+  return (
+    <div className="grid grid-cols-[48px_1fr] gap-2.5 border-l-2 border-transparent px-4 py-2.5">
+      <div className="pt-0.5 font-mono text-[11px]">
+        <SkeletonLine className="w-8" />
+      </div>
+      <div>
+        <span className="mb-1 inline-flex animate-pulse rounded-full bg-muted px-2 py-0.5 text-[11px] leading-none font-medium text-transparent">
+          Speaker 1
+        </span>
+        <p className="mt-1 text-[13.5px] leading-normal">
+          <SkeletonLine className="w-full" />
+        </p>
+        <p className="text-[13.5px] leading-normal">
+          <SkeletonLine className="w-[78%]" />
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function CallDetailSkeleton() {
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden px-7 pt-4 pb-6">
+      <div className="mb-3 text-[12.5px]">
+        <SkeletonLine className="w-24" />
+      </div>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-[19px] font-semibold tracking-tight">
+            <SkeletonLine className="w-56" />
+          </h1>
+          <div className="mt-1.5">
+            <p className="font-mono text-[11.5px]">
+              <SkeletonLine className="w-72" />
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex h-7 w-[118px] animate-pulse rounded-lg border border-border bg-muted" />
+          <span className="inline-flex h-7 w-[86px] animate-pulse rounded-lg border border-border bg-muted" />
+        </div>
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-background">
+          <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
+            <h3 className="text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase">
+              Transcript
+            </h3>
+            <span className="font-mono text-[10.5px]">
+              <SkeletonLine className="w-12" />
+            </span>
+          </header>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {Array.from({ length: 8 }, (_, i) => (
+              <TranscriptRowSkeleton key={i} />
+            ))}
+          </div>
+        </section>
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-background">
+          <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
+            <h3 className="text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase">
+              Intel
+            </h3>
+            <span className="font-mono text-[10.5px]">
+              <SkeletonLine className="w-12" />
+            </span>
+          </header>
+          <div className="min-h-0 flex-1 overflow-hidden p-4">
+            <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+              Run status
+            </h4>
+            <p className="mb-4 flex items-center gap-1.5 text-[13px] font-medium">
+              <span className="size-[7px] animate-pulse rounded-full bg-muted" />
+              <SkeletonLine className="w-20" />
+            </p>
+            <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+              Summary
+            </h4>
+            <div className="mb-4 flex gap-2.5">
+              <div className="w-0.5 shrink-0 self-stretch animate-pulse rounded-sm bg-muted" />
+              <div className="min-w-0 flex-1 py-0.5">
+                <div className="text-[12.5px] font-semibold">
+                  <SkeletonLine className="w-[70%]" />
+                </div>
+                <p className="mt-0.5 text-xs leading-snug">
+                  <SkeletonLine className="w-full" />
+                </p>
+              </div>
+            </div>
+            <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+              Objections
+            </h4>
+            <div className="mb-4 flex gap-2.5">
+              <div className="w-0.5 shrink-0 self-stretch animate-pulse rounded-sm bg-muted" />
+              <div className="min-w-0 flex-1 py-0.5">
+                <div className="text-[12.5px] font-semibold">
+                  <SkeletonLine className="w-[55%]" />
+                </div>
+                <p className="mt-0.5 text-xs leading-snug">
+                  <SkeletonLine className="w-[90%]" />
+                </p>
+              </div>
+            </div>
+            <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+              Intent
+            </h4>
+            <div className="flex gap-2.5">
+              <div className="w-0.5 shrink-0 self-stretch animate-pulse rounded-sm bg-muted" />
+              <div className="min-w-0 flex-1 py-0.5">
+                <div className="text-[12.5px] font-semibold">
+                  <SkeletonLine className="w-24" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
@@ -828,7 +914,8 @@ function ExportMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button type="button" variant="outline" size="sm">
+        <Button type="button" variant="outline" size="sm" data-icon="inline-start">
+          <FileDown className="size-3.5" />
           {format === "json" ? "JSON" : "Markdown"}
           <ChevronDown className="size-3.5" />
         </Button>
@@ -913,11 +1000,12 @@ function TranscriptPlayer({
   src: string;
   duration: number;
   segments: TranscriptSegment[];
-  seek: { at: number; n: number } | null;
+  seek: { at: number; until: number | null; n: number } | null;
   onActiveId: (id: string | null) => void;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const lastId = useRef<string | null>(null);
+  const clipUntil = useRef<number | null>(null);
   const segmentsRef = useRef(segments);
   const [playing, setPlaying] = useState(false);
   const [cursor, setCursor] = useState(0);
@@ -940,6 +1028,7 @@ function TranscriptPlayer({
     audio.pause();
     audio.currentTime = 0;
     lastId.current = null;
+    clipUntil.current = null;
     setPlaying(false);
     setCursor(0);
     setMediaDuration(0);
@@ -950,6 +1039,7 @@ function TranscriptPlayer({
     if (!seek) return;
     const audio = audioRef.current;
     if (!audio) return;
+    clipUntil.current = seek.until;
     audio.currentTime = seek.at;
     setCursor(seek.at);
     emitActive(seek.at);
@@ -960,7 +1050,10 @@ function TranscriptPlayer({
     const audio = audioRef.current;
     if (!audio) return;
     if (playing) audio.pause();
-    else void audio.play();
+    else {
+      clipUntil.current = null;
+      void audio.play();
+    }
   }
 
   function seekBar(event: MouseEvent<HTMLButtonElement>) {
@@ -971,6 +1064,7 @@ function TranscriptPlayer({
       Math.max(0, (event.clientX - rect.left) / rect.width),
     );
     const at = next * total;
+    clipUntil.current = null;
     const audio = audioRef.current;
     if (audio) audio.currentTime = at;
     setCursor(at);
@@ -1000,7 +1094,16 @@ function TranscriptPlayer({
           }
         }}
         onTimeUpdate={() => {
-          const t = audioRef.current?.currentTime ?? 0;
+          const audio = audioRef.current;
+          const t = audio?.currentTime ?? 0;
+          const stop = clipUntil.current;
+          if (audio && stop != null && t >= stop) {
+            clipUntil.current = null;
+            audio.pause();
+            audio.currentTime = stop;
+            setCursor(stop);
+            return;
+          }
           setCursor(t);
           emitActive(t);
         }}
