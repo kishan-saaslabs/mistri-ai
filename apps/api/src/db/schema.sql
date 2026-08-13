@@ -176,3 +176,23 @@ ALTER TABLE transcriptions ADD CONSTRAINT transcriptions_status_check
   ));
 
 CREATE INDEX IF NOT EXISTS transcriptions_call_id_idx ON transcriptions (call_id);
+
+-- LLM speaker-name inference results for a transcription: the fully
+-- resolved named transcript (segments + speakerName) plus the raw
+-- InferredSpeaker[] suggestions, cached per transcription_id (not call_id
+-- — a call can have multiple transcription rows across retries with
+-- different segments, so each retry gets its own inference). call_id is
+-- carried directly for convenient querying without joining through
+-- transcriptions on every read.
+CREATE TABLE IF NOT EXISTS call_transcripts (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  call_id            UUID NOT NULL REFERENCES calls (id) ON DELETE CASCADE,
+  transcription_id   UUID NOT NULL REFERENCES transcriptions (id) ON DELETE CASCADE,
+  segments           JSONB NOT NULL,
+  inferred_speakers  JSONB NOT NULL,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT call_transcripts_transcription_id_key UNIQUE (transcription_id)
+);
+
+CREATE INDEX IF NOT EXISTS call_transcripts_call_id_idx ON call_transcripts (call_id);
