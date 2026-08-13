@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { Diamond, Loader2, LogOut, MessageCircleQuestion, Users } from "lucide-react";
+import { Handshake, LogOut, Sparkles, Users, X } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
+import { motionTransition, springs } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/state/auth";
 
@@ -25,17 +27,26 @@ function initialsOf(name: string) {
 }
 
 const nav = [
-  { to: "/deals", label: "Deals", icon: Diamond },
+  { to: "/deals", label: "Deals", icon: Handshake },
   { to: "/team", label: "Team", icon: Users },
-  { to: "/ask", label: "Ask Mistri", icon: MessageCircleQuestion },
+  { to: "/ask", label: "Ask Mistri", icon: Sparkles },
 ];
 
-export function Sidebar() {
+function SidebarBody({
+  onNavigate,
+  onClose,
+  pillId,
+}: {
+  onNavigate?: () => void;
+  onClose?: () => void;
+  pillId: string;
+}) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const reduce = useReducedMotion();
 
   async function handleLogout() {
     if (signingOut) return;
@@ -54,12 +65,24 @@ export function Sidebar() {
     : "";
 
   return (
-    <aside className="hidden h-full w-[232px] shrink-0 flex-col border-r border-border bg-sidebar px-3 py-4 text-ink-soft md:flex">
+    <>
       <div className="mb-5 flex items-center gap-2.5 px-2 pt-1">
         <div className="flex size-[26px] shrink-0 items-center justify-center rounded-md bg-foreground text-[12.5px] font-bold text-background">
           M
         </div>
-        <div className="text-[14.5px] font-semibold tracking-tight text-foreground">Mistri AI</div>
+        <div className="min-w-0 flex-1 text-[14.5px] font-semibold tracking-tight text-foreground">
+          Mistri AI
+        </div>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close menu"
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <X className="size-3.5" />
+          </button>
+        ) : null}
       </div>
 
       <nav className="mb-4 space-y-px">
@@ -67,6 +90,7 @@ export function Sidebar() {
           <NavLink
             key={item.to}
             to={item.to}
+            onClick={onNavigate}
             className={({ isActive }) => {
               const active =
                 item.to === "/deals"
@@ -75,14 +99,33 @@ export function Sidebar() {
                     pathname.startsWith("/calls/")
                   : isActive;
               return cn(
-                "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] text-ink-soft",
-                active && "bg-muted font-semibold text-foreground",
-                !active && "hover:bg-muted hover:text-foreground",
+                "relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] text-ink-soft",
+                active && "font-semibold text-foreground",
+                !active && "hover:text-foreground",
               );
             }}
           >
-            <item.icon className="size-3.5 opacity-85" />
-            {item.label}
+            {({ isActive }) => {
+              const active =
+                item.to === "/deals"
+                  ? pathname === "/deals" ||
+                    pathname.startsWith("/deals/") ||
+                    pathname.startsWith("/calls/")
+                  : isActive;
+              return (
+                <>
+                  {active ? (
+                    <motion.span
+                      layoutId={pillId}
+                      className="absolute inset-0 rounded-md bg-muted"
+                      transition={motionTransition(reduce, springs.pill)}
+                    />
+                  ) : null}
+                  <item.icon className="relative z-1 size-3.5 opacity-85" />
+                  <span className="relative z-1">{item.label}</span>
+                </>
+              );
+            }}
           </NavLink>
         ))}
       </nav>
@@ -137,14 +180,79 @@ export function Sidebar() {
               type="button"
               variant="destructive"
               onClick={() => void handleLogout()}
-              disabled={signingOut}
+              pending={signingOut}
             >
-              {signingOut ? <Loader2 className="size-4 animate-spin" /> : null}
               Sign out
             </Button>
           </div>
         </DialogContent>
       </Dialog>
-    </aside>
+    </>
+  );
+}
+
+const panelClass =
+  "flex h-full w-[232px] shrink-0 flex-col border-r border-border bg-sidebar px-3 py-4 text-ink-soft";
+
+export function Sidebar({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { pathname } = useLocation();
+  const reduce = useReducedMotion();
+
+  useEffect(() => {
+    onOpenChange(false);
+  }, [pathname, onOpenChange]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onOpenChange(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onOpenChange]);
+
+  return (
+    <>
+      <aside className={cn("hidden md:flex", panelClass)}>
+        <SidebarBody pillId="sidebar-nav-desktop" />
+      </aside>
+
+      <div
+        className={cn(
+          "fixed inset-0 z-50 md:hidden",
+          !open && "pointer-events-none",
+        )}
+      >
+        <motion.button
+          type="button"
+          tabIndex={open ? 0 : -1}
+          aria-label="Close menu"
+          className="absolute inset-0 bg-black/40"
+          initial={false}
+          animate={{ opacity: open ? 1 : 0 }}
+          transition={motionTransition(reduce, springs.overlay)}
+          onClick={() => onOpenChange(false)}
+        />
+        <motion.aside
+          id="mobile-sidebar"
+          className={cn(panelClass, "relative max-w-[85vw]")}
+          initial={false}
+          animate={{ x: open ? 0 : "-100%" }}
+          transition={motionTransition(reduce, springs.smooth)}
+        >
+          <SidebarBody
+            pillId="sidebar-nav-mobile"
+            onNavigate={() => onOpenChange(false)}
+            onClose={() => onOpenChange(false)}
+          />
+        </motion.aside>
+      </div>
+    </>
   );
 }

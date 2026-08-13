@@ -6,9 +6,11 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { Loader2, Plus, Search } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { motionTransition, springs } from "@/lib/motion";
 import {
   Dialog,
   DialogContent,
@@ -17,10 +19,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MorphIn, SkeletonLine } from "@/components/ui/skeleton";
 import { ApiError, dealsApi, type Deal } from "@/lib/api";
 import { formatDate } from "@/lib/display";
-import { useAsyncData } from "@/lib/useAsyncData";
+import { queryErrorMessage, queryKeys } from "@/lib/query";
 import { cn } from "@/lib/utils";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export type DealsOutletContext = {
   deals: Deal[];
@@ -32,44 +36,52 @@ export type DealsOutletContext = {
 };
 
 export function DealsLayout() {
-  const { data, loading, error, refetch } = useAsyncData<Deal[]>(
-    () => dealsApi.list(),
-    [],
-  );
-  const [created, setCreated] = useState<Deal[]>([]);
+  const queryClient = useQueryClient();
+  const dealsQuery = useQuery({
+    queryKey: queryKeys.deals,
+    queryFn: dealsApi.list,
+  });
   const [activeDealId, setActiveDealId] = useState<string | null>(null);
   const { pathname } = useLocation();
   const dealIdFromPath = pathname.match(/^\/deals\/([^/]+)/)?.[1] ?? null;
   const selectedDealId = dealIdFromPath ?? activeDealId;
-  const deals = useMemo(() => {
-    const list = data ?? [];
-    const ids = new Set(list.map((deal) => deal.id));
-    const extra = created.filter((deal) => !ids.has(deal.id));
-    return extra.length ? [...extra, ...list] : list;
-  }, [data, created]);
+  const onOverview = pathname === "/deals";
+  const deals = dealsQuery.data ?? [];
+  const loading = dealsQuery.isPending;
+  const error = dealsQuery.error ? queryErrorMessage(dealsQuery.error) : null;
 
   function rememberDeal(deal: Deal) {
-    setCreated((prev) => [deal, ...prev.filter((d) => d.id !== deal.id)]);
-    refetch();
+    queryClient.setQueryData<Deal[]>(queryKeys.deals, (prev) =>
+      prev ? [deal, ...prev.filter((d) => d.id !== deal.id)] : [deal],
+    );
   }
+
+  const showDealList = loading || deals.length > 0;
 
   return (
     <div className="flex h-full min-h-0">
-      {deals.length > 0 ? (
+      {showDealList ? (
         <DealList
           deals={deals}
+          loading={loading && deals.length === 0}
           selectedDealId={selectedDealId}
+          onOverview={onOverview}
           onCreated={rememberDeal}
         />
       ) : null}
-      <div className="min-w-0 flex-1 overflow-hidden">
+      <div
+        className={cn(
+          "min-w-0 flex-1 overflow-hidden",
+          onOverview && showDealList && "max-md:hidden",
+        )}
+      >
         <Outlet
           context={
             {
               deals,
               loading,
               error,
-              refetch,
+              refetch: () => void dealsQuery.refetch(),
               rememberDeal,
               setActiveDealId,
             } satisfies DealsOutletContext
@@ -82,11 +94,15 @@ export function DealsLayout() {
 
 function DealList({
   deals,
+  loading,
   selectedDealId,
+  onOverview,
   onCreated,
 }: {
   deals: Deal[];
+  loading: boolean;
   selectedDealId: string | null;
+  onOverview: boolean;
   onCreated: (deal: Deal) => void;
 }) {
   const navigate = useNavigate();
@@ -94,6 +110,7 @@ function DealList({
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
+  const reduce = useReducedMotion();
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -122,7 +139,12 @@ function DealList({
   }
 
   return (
-    <aside className="flex h-full w-[260px] shrink-0 flex-col border-r border-border bg-background max-md:w-[220px]">
+    <aside
+      className={cn(
+        "flex h-full w-full shrink-0 flex-col border-r border-border bg-background md:w-[260px]",
+        !onOverview && "max-md:hidden",
+      )}
+    >
       <div className="shrink-0 border-b border-border px-3 pt-4 pb-3">
         <div className="mb-2.5 flex items-center justify-between gap-2">
           <Link
@@ -180,8 +202,11 @@ function DealList({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={creating || !name.trim()}>
-                {creating && <Loader2 className="size-4 animate-spin" />}
+              <Button
+                type="submit"
+                disabled={creating || !name.trim()}
+                pending={creating}
+              >
                 Create deal
               </Button>
             </div>
@@ -190,29 +215,60 @@ function DealList({
       </Dialog>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {visible.length === 0 ? (
+        {loading ? (
+          Array.from({ length: 6 }, (_, i) => (
+            <div key={i} className="border-b border-border px-3 py-2.5">
+              <div className="truncate text-[13px] font-medium">
+                <SkeletonLine className="w-[70%]" />
+              </div>
+              <div className="mt-px font-mono text-[10.5px]">
+                <SkeletonLine className="w-[42%]" />
+              </div>
+            </div>
+          ))
+        ) : visible.length === 0 ? (
           <p className="px-3 py-6 text-center text-[12.5px] text-muted-foreground">
             No deals match “{query}”.
           </p>
         ) : (
-          visible.map((deal) => (
-            <NavLink
-              key={deal.id}
-              to={`/deals/${deal.id}`}
-              className={cn(
-                "block border-b border-border px-3 py-2.5 hover:bg-muted/50",
-                selectedDealId === deal.id &&
-                  "border-l-2 border-l-brand bg-brand-tint py-2.5 pr-3 pl-[10px]",
-              )}
-            >
-              <div className="truncate text-[13px] font-medium">
-                {deal.name}
-              </div>
-              <div className="mt-px font-mono text-[10.5px] text-muted-foreground">
-                Created {formatDate(deal.created_at)}
-              </div>
-            </NavLink>
-          ))
+          <MorphIn>
+            <AnimatePresence mode="popLayout" initial={false}>
+              {visible.map((deal) => {
+                const selected = selectedDealId === deal.id;
+                return (
+                  <motion.div
+                    key={deal.id}
+                    layout
+                    initial={reduce ? false : { opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={
+                      reduce ? { opacity: 0 } : { opacity: 0, scale: 0.98 }
+                    }
+                    transition={motionTransition(reduce, springs.smooth)}
+                  >
+                    <NavLink
+                      to={`/deals/${deal.id}`}
+                      className="relative block border-b border-border px-3 py-2.5 hover:bg-muted/50"
+                    >
+                      {selected ? (
+                        <motion.span
+                          layoutId="deal-list-pill"
+                          className="absolute inset-0 border-l-2 border-l-brand bg-brand-tint"
+                          transition={motionTransition(reduce, springs.pill)}
+                        />
+                      ) : null}
+                      <div className="relative z-1 truncate text-[13px] font-medium">
+                        {deal.name}
+                      </div>
+                      <div className="relative z-1 mt-px font-mono text-[10.5px] text-muted-foreground">
+                        {formatDate(deal.created_at)}
+                      </div>
+                    </NavLink>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          </MorphIn>
         )}
       </div>
     </aside>

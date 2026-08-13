@@ -2,17 +2,18 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useState,
   type ReactNode,
 } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ApiError,
   authApi,
   type AuthUser,
   type LoginInput,
   type RegisterInput,
 } from "@/lib/api";
+import { queryKeys } from "@/lib/query";
 
 type AuthValue = {
   user: AuthUser | null;
@@ -26,53 +27,58 @@ type AuthValue = {
 const AuthContext = createContext<AuthValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const me = useQuery({
+    queryKey: queryKeys.me,
+    queryFn: async () => {
+      try {
+        return (await authApi.me()).user;
+      } catch (err) {
+        if (err instanceof ApiError && (err.status === 401 || err.status === 0)) {
+          return null;
+        }
+        throw err;
+      }
+    },
+    retry: false,
+    staleTime: 60_000,
+  });
 
-  // Restore the session from the HttpOnly cookie on first load.
-  useEffect(() => {
-    let cancelled = false;
-    authApi
-      .me()
-      .then((res) => {
-        if (!cancelled) setUser(res.user);
-      })
-      .catch(() => {
-        if (!cancelled) setUser(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const login = useCallback(
+    async (input: LoginInput) => {
+      const res = await authApi.login(input);
+      queryClient.setQueryData(queryKeys.me, res.user);
+    },
+    [queryClient],
+  );
 
-  const login = useCallback(async (input: LoginInput) => {
-    const res = await authApi.login(input);
-    setUser(res.user);
-  }, []);
-
-  const register = useCallback(async (input: RegisterInput) => {
-    const res = await authApi.register(input);
-    setUser(res.user);
-  }, []);
+  const register = useCallback(
+    async (input: RegisterInput) => {
+      const res = await authApi.register(input);
+      queryClient.setQueryData(queryKeys.me, res.user);
+    },
+    [queryClient],
+  );
 
   const logout = useCallback(async () => {
-    // Ask the server to expire the HttpOnly access_token cookie, then drop the
-    // client session regardless of whether the request succeeded.
     try {
       await authApi.logout();
     } catch {
       // Best effort — clear the local session even if the call fails.
     } finally {
-      setUser(null);
+      queryClient.clear();
     }
-  }, []);
+  }, [queryClient]);
 
   const value = useMemo<AuthValue>(
-    () => ({ user, loading, login, register, logout }),
-    [user, loading, login, register, logout],
+    () => ({
+      user: me.data ?? null,
+      loading: me.isPending,
+      login,
+      register,
+      logout,
+    }),
+    [me.data, me.isPending, login, register, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
-import { Loader2, Plus, UserPlus } from "lucide-react";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Plus, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { AddCallDialog } from "@/components/deals/AddCallDialog";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { MorphFrame, MorphIn, SkeletonLine } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDuration } from "@/lib/format";
 import {
@@ -24,7 +26,7 @@ import {
   type CallStatus,
 } from "@/lib/api";
 import { formatDate, initialsOf, roleLabel } from "@/lib/display";
-import { useAsyncData } from "@/lib/useAsyncData";
+import { queryErrorMessage, queryKeys } from "@/lib/query";
 import { cn } from "@/lib/utils";
 import type { DealsOutletContext } from "@/components/deals/DealsLayout";
 
@@ -60,54 +62,47 @@ const STATUS_STYLES: Record<
 
 /** Fetch a deal's calls and keep pending ones fresh via polling. */
 function useDealCalls(dealId: string) {
-  const { data, loading, error, refetch } = useAsyncData<Call[]>(
-    () => dealsApi.calls(dealId),
-    [dealId],
-  );
-  const [overrides, setOverrides] = useState<Record<string, Call>>({});
-
-  const calls = (data ?? []).map((call) => overrides[call.id] ?? call);
-  const pendingKey = calls
+  const queryClient = useQueryClient();
+  const list = useQuery({
+    queryKey: queryKeys.dealCalls(dealId),
+    queryFn: () => dealsApi.calls(dealId),
+    enabled: Boolean(dealId),
+  });
+  const pendingIds = (list.data ?? [])
     .filter((call) => isPendingStatus(call.status))
-    .map((call) => call.id)
-    .sort()
-    .join(",");
+    .map((call) => call.id);
+  const pending = useQueries({
+    queries: pendingIds.map((id) => ({
+      queryKey: queryKeys.call(id),
+      queryFn: async () => {
+        const detail = await callsApi.get(id);
+        queryClient.setQueryData<Call[]>(
+          queryKeys.dealCalls(dealId),
+          (prev) =>
+            prev?.map((row) =>
+              row.id === detail.call.id ? detail.call : row,
+            ) ?? prev,
+        );
+        return detail;
+      },
+      refetchInterval: POLL_MS,
+    })),
+  });
+  const overrides = new Map(
+    pending.flatMap((q) => (q.data ? [[q.data.call.id, q.data.call] as const] : [])),
+  );
+  const calls = (list.data ?? []).map((call) => overrides.get(call.id) ?? call);
 
-  useEffect(() => {
-    setOverrides({});
-  }, [dealId]);
-
-  useEffect(() => {
-    if (!pendingKey) return;
-    const ids = pendingKey.split(",");
-    let active = true;
-    const timer = window.setInterval(() => {
-      void Promise.allSettled(ids.map((id) => callsApi.get(id))).then(
-        (results) => {
-          if (!active) return;
-          setOverrides((prev) => {
-            const next = { ...prev };
-            for (const result of results) {
-              if (result.status === "fulfilled") {
-                next[result.value.call.id] = result.value.call;
-              }
-            }
-            return next;
-          });
-        },
-      );
-    }, POLL_MS);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [pendingKey]);
-
-  const reset = () => setOverrides({});
-  return { calls, loading, error, refetch, reset };
+  return {
+    calls,
+    loading: list.isPending,
+    error: list.error ? queryErrorMessage(list.error) : null,
+    refetch: () => void list.refetch(),
+  };
 }
 
 export function DealDetailView() {
+  const queryClient = useQueryClient();
   const { id = "" } = useParams();
   const {
     deals,
@@ -119,17 +114,20 @@ export function DealDetailView() {
 
   const deal = deals.find((d) => d.id === id) ?? null;
   const callsState = useDealCalls(id);
-  const membersState = useAsyncData<AuthUser[]>(
-    () => dealsApi.members(id),
-    [id],
-  );
+  const membersQuery = useQuery({
+    queryKey: queryKeys.dealMembers(id),
+    queryFn: () => dealsApi.members(id),
+    enabled: Boolean(id),
+  });
+  const membersState = {
+    data: membersQuery.data ?? null,
+    loading: membersQuery.isPending,
+    error: membersQuery.error ? queryErrorMessage(membersQuery.error) : null,
+    refetch: () => void membersQuery.refetch(),
+  };
 
   if (dealsLoading && !deal) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="size-5 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <DealDetailSkeleton />;
   }
 
   if (!deal) {
@@ -148,7 +146,14 @@ export function DealDetailView() {
   const callCount = callsState.calls.length;
 
   return (
-    <div className="mx-auto w-full max-w-[900px] overflow-y-auto px-7 pt-8 pb-[60px]">
+    <div className="mx-auto w-full max-w-[900px] overflow-y-auto px-4 pt-6 pb-[60px] md:px-7 md:pt-8">
+      <Link
+        to="/deals"
+        className="mb-3 inline-flex w-fit items-center gap-1.5 text-[12.5px] text-muted-foreground hover:text-foreground md:hidden"
+      >
+        <ArrowLeft className="size-3.5" />
+        All deals
+      </Link>
       {/* Header + stat strip */}
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
@@ -174,7 +179,7 @@ export function DealDetailView() {
           data-icon="inline-start"
           onClick={() => setAddOpen(true)}
         >
-          <Plus className="size-4" />
+          <Plus className="size-3.5" />
           Add call
         </Button>
       </div>
@@ -187,17 +192,19 @@ export function DealDetailView() {
           >
             <TabsTrigger
               value="calls"
-              className="flex-none rounded-none px-3 pb-2.5 first:pl-0 after:bottom-[-1px]"
+              className="flex-none rounded-none px-3 pb-2.5 first:pl-0"
             >
               Calls
-              {!callsState.loading && <TabCount>{callCount}</TabCount>}
+              <TabCount loading={callsState.loading}>{callCount}</TabCount>
             </TabsTrigger>
             <TabsTrigger
               value="settings"
-              className="flex-none rounded-none px-3 pb-2.5 after:bottom-[-1px]"
+              className="flex-none rounded-none px-3 pb-2.5"
             >
               Settings
-              {!membersState.loading && <TabCount>{members.length}</TabCount>}
+              <TabCount loading={membersState.loading}>
+                {members.length}
+              </TabCount>
             </TabsTrigger>
           </TabsList>
         </div>
@@ -221,9 +228,11 @@ export function DealDetailView() {
         open={addOpen}
         onOpenChange={setAddOpen}
         dealId={id}
-        onAdded={() => {
-          callsState.reset();
-          callsState.refetch();
+        onAdded={(call) => {
+          queryClient.setQueryData<Call[]>(
+            queryKeys.dealCalls(id),
+            (prev) => (prev ? [call, ...prev] : [call]),
+          );
         }}
       />
     </div>
@@ -239,9 +248,12 @@ function Stat({
 }) {
   return (
     <div className="flex flex-col">
-      <span className="text-[16px] font-semibold tabular-nums">
-        {value === undefined ? "–" : value}
-      </span>
+      <MorphFrame
+        loading={value === undefined}
+        className="h-5 min-w-6 rounded-sm text-[16px] leading-none font-semibold tabular-nums"
+      >
+        {value}
+      </MorphFrame>
       <span className="mt-0.5 font-mono text-[9.5px] tracking-[0.08em] text-muted-foreground uppercase">
         {label}
       </span>
@@ -249,10 +261,21 @@ function Stat({
   );
 }
 
-function TabCount({ children }: { children: React.ReactNode }) {
+function TabCount({
+  children,
+  loading,
+}: {
+  children?: React.ReactNode;
+  loading?: boolean;
+}) {
   return (
-    <span className="rounded-full border border-border bg-muted px-1.5 py-px font-mono text-[10px] text-ink-soft">
-      {children}
+    <span
+      className={cn(
+        "inline-flex h-[18px] min-w-[22px] items-center justify-center rounded-full border border-border bg-muted px-1.5 font-mono text-[10px] leading-none tabular-nums text-ink-soft",
+        loading && "animate-pulse text-transparent",
+      )}
+    >
+      {loading ? "0" : children}
     </span>
   );
 }
@@ -272,8 +295,10 @@ function CallsTab({
 }) {
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-10">
-        <Loader2 className="size-4 animate-spin text-muted-foreground" />
+      <div className="overflow-hidden rounded-xl border border-border">
+        {Array.from({ length: 5 }, (_, i) => (
+          <CallRowSkeleton key={i} last={i === 4} />
+        ))}
       </div>
     );
   }
@@ -311,7 +336,7 @@ function CallsTab({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border">
+    <MorphIn className="overflow-hidden rounded-xl border border-border">
       {calls.map((call, i) => {
         const status = STATUS_STYLES[call.status];
         return (
@@ -344,7 +369,7 @@ function CallsTab({
           </Link>
         );
       })}
-    </div>
+    </MorphIn>
   );
 }
 
@@ -360,13 +385,17 @@ function SettingsTab({
     refetch: () => void;
   };
 }) {
-  const orgState = useAsyncData<AuthUser[]>(() => usersApi.list(), []);
+  const queryClient = useQueryClient();
+  const orgQuery = useQuery({
+    queryKey: queryKeys.users,
+    queryFn: usersApi.list,
+  });
 
   const [selected, setSelected] = useState("");
   const [adding, setAdding] = useState(false);
 
   const members = membersState.data ?? [];
-  const orgUsers = orgState.data ?? [];
+  const orgUsers = orgQuery.data ?? [];
 
   const memberIds = new Set(members.map((m) => m.id));
   const available = orgUsers.filter((u) => !memberIds.has(u.id));
@@ -375,11 +404,11 @@ function SettingsTab({
     if (!selected || adding) return;
     setAdding(true);
     try {
-      await dealsApi.addMembers(dealId, [selected]);
+      const next = await dealsApi.addMembers(dealId, [selected]);
+      queryClient.setQueryData(queryKeys.dealMembers(dealId), next);
       const added = available.find((u) => u.id === selected);
       toast.success(`${added?.name ?? "Member"} added to this deal.`);
       setSelected("");
-      membersState.refetch();
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.message : "Could not add the member.",
@@ -398,10 +427,15 @@ function SettingsTab({
             People with access to this deal and its calls.
           </p>
         </div>
-        {orgState.loading ? (
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
-        ) : orgState.error ? (
-          <p className="text-[12.5px] text-muted-foreground">{orgState.error}</p>
+        {orgQuery.isPending ? (
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-8 min-w-[200px] animate-pulse rounded-lg border border-border bg-muted" />
+            <span className="inline-flex h-8 w-[118px] animate-pulse rounded-lg bg-muted" />
+          </div>
+        ) : orgQuery.error ? (
+          <p className="text-[12.5px] text-muted-foreground">
+            {queryErrorMessage(orgQuery.error)}
+          </p>
         ) : available.length > 0 ? (
           <div className="flex min-w-0 max-w-[460px] flex-1 items-center justify-end gap-2">
             <Select value={selected} onValueChange={setSelected}>
@@ -420,13 +454,10 @@ function SettingsTab({
               type="button"
               data-icon="inline-start"
               onClick={addSelected}
-              disabled={!selected || adding}
+              disabled={!selected}
+              pending={adding}
             >
-              {adding ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <UserPlus className="size-3.5" />
-              )}
+              <UserPlus className="size-3.5" />
               Add member
             </Button>
           </div>
@@ -434,8 +465,10 @@ function SettingsTab({
       </div>
 
       {membersState.loading ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        <div className="overflow-hidden rounded-lg border border-border">
+          {Array.from({ length: 4 }, (_, i) => (
+            <MemberRowSkeleton key={i} last={i === 3} />
+          ))}
         </div>
       ) : membersState.error ? (
         <div className="py-8 text-center">
@@ -459,7 +492,7 @@ function SettingsTab({
           </p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
+        <MorphIn className="overflow-hidden rounded-lg border border-border">
           {members.map((member, i) => (
             <div
               key={member.id}
@@ -484,8 +517,107 @@ function SettingsTab({
               </span>
             </div>
           ))}
-        </div>
+        </MorphIn>
       )}
+    </div>
+  );
+}
+
+function CallRowSkeleton({ last }: { last?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 px-4 py-3",
+        !last && "border-b border-border",
+      )}
+    >
+      <span className="size-[7px] shrink-0 animate-pulse rounded-full bg-muted" />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-medium">
+          <SkeletonLine className="w-[55%]" />
+        </div>
+        <div className="mt-px font-mono text-[10.5px]">
+          <SkeletonLine className="w-[40%]" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MemberRowSkeleton({ last }: { last?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 px-4 py-2.5",
+        !last && "border-b border-border",
+      )}
+    >
+      <span className="size-7 shrink-0 animate-pulse rounded-[6px] border border-border bg-muted" />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-medium">
+          <SkeletonLine className="w-[40%]" />
+        </div>
+        <div className="truncate font-mono text-[10.5px]">
+          <SkeletonLine className="w-[55%]" />
+        </div>
+      </div>
+      <span className="shrink-0 animate-pulse rounded-full border border-border bg-muted px-2 py-0.5 font-mono text-[10px] text-transparent">
+        Member
+      </span>
+    </div>
+  );
+}
+
+function DealDetailSkeleton() {
+  return (
+    <div className="mx-auto w-full max-w-[900px] overflow-y-auto px-4 pt-6 pb-[60px] md:px-7 md:pt-8">
+      <div className="mb-3 text-[12.5px] md:hidden">
+        <SkeletonLine className="w-20" />
+      </div>
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-[24px] font-semibold tracking-tight">
+            <SkeletonLine className="w-48" />
+          </h1>
+          <p className="mt-0.5 font-mono text-[11px]">
+            <SkeletonLine className="w-36" />
+          </p>
+          <div className="mt-2.5 flex gap-7">
+            <div className="flex flex-col">
+              <span className="h-5 w-6 animate-pulse rounded-sm bg-muted" />
+              <span className="mt-0.5 font-mono text-[9.5px] tracking-[0.08em] text-muted-foreground uppercase">
+                Calls
+              </span>
+            </div>
+            <div className="flex flex-col">
+              <span className="h-5 w-6 animate-pulse rounded-sm bg-muted" />
+              <span className="mt-0.5 font-mono text-[9.5px] tracking-[0.08em] text-muted-foreground uppercase">
+                Members
+              </span>
+            </div>
+          </div>
+        </div>
+        <span className="inline-flex h-8 w-[92px] animate-pulse rounded-lg bg-muted" />
+      </div>
+      <div className="w-full border-b border-border">
+        <div className="flex gap-0">
+          <div className="flex items-center gap-1.5 px-3 pb-2.5 pl-0 text-sm font-medium">
+            Calls
+            <TabCount loading />
+          </div>
+          <div className="flex items-center gap-1.5 px-3 pb-2.5 text-sm font-medium">
+            Settings
+            <TabCount loading />
+          </div>
+        </div>
+      </div>
+      <div className="pt-5">
+        <div className="overflow-hidden rounded-xl border border-border">
+          {Array.from({ length: 5 }, (_, i) => (
+            <CallRowSkeleton key={i} last={i === 4} />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

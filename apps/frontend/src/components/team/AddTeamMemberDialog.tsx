@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -148,8 +147,7 @@ export function AddTeamMemberDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting}>
-              {submitting && <Loader2 className="size-4 animate-spin" />}
+            <Button type="submit" pending={submitting}>
               Add member
             </Button>
           </div>
