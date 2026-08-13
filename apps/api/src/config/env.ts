@@ -33,6 +33,16 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().url().default("http://localhost:5173"),
   UPLOAD_DIR: z.string().min(1).default("uploads"),
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(50 * 1024 * 1024),
+  PYAI_API_KEY: z
+    .string()
+    .max(512)
+    .optional()
+    .transform((value) => {
+      const trimmed = value?.trim() ?? "";
+      return trimmed.length > 0 ? trimmed : undefined;
+    }),
+  PYAI_BASE_URL: z.string().url().default("https://api.pyai.com"),
+  PYAI_TRANSCRIBE_MODEL: z.string().min(1).default("pyai-hear"),
 });
 
 const parsed = envSchema.safeParse(process.env);

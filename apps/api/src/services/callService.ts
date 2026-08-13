@@ -1,8 +1,8 @@
 import { basename } from "node:path";
 import { z } from "zod";
-import { CallModel, emptyAnalysis } from "../models/callModel.js";
+import { CallModel } from "../models/callModel.js";
 import { DealModel } from "../models/dealModel.js";
-import { RepModel } from "../models/repModel.js";
+import { TranscriptionService } from "./transcriptionService.js";
 import { HttpError } from "../utils/httpError.js";
 
 const uuid = z.string().uuid();
@@ -17,7 +17,6 @@ export const updateCallSchema = z.object({
 
 export const linkCallSchema = z.object({
   url: z.string().url().max(2048),
-  repId: z.string().uuid(),
   dealId: z.string().uuid().nullable().optional(),
   label: z.string().trim().max(200).optional(),
 });
@@ -26,9 +25,31 @@ function sanitizeLabel(raw: string) {
   return raw.replace(/[<>]/g, "").trim().slice(0, 200);
 }
 
+async function assertDeal(dealId: string | null | undefined) {
+  if (!dealId) return;
+  uuid.parse(dealId);
+  const deal = await DealModel.findById(dealId);
+  if (!deal) {
+    throw new HttpError(400, "Deal not found");
+  }
+}
+
+function startTranscription(callId: string) {
+  void TranscriptionService.transcribeCall(callId).catch((error) => {
+    const message = error instanceof Error ? error.message : "Transcription failed";
+    console.error("Transcription failed:", message);
+  });
+}
+
 export const CallService = {
   list() {
     return CallModel.list();
+  },
+
+  async listByDeal(dealId: string) {
+    uuid.parse(dealId);
+    await assertDeal(dealId);
+    return CallModel.listByDeal(dealId);
   },
 
   async get(id: string) {
@@ -37,17 +58,13 @@ export const CallService = {
     if (!call) {
       throw new HttpError(404, "Call not found");
     }
-    return call;
+    const transcriptions = await TranscriptionService.listForCall(id);
+    return { call, transcriptions };
   },
 
   async mapDeal(id: string, dealId: string | null) {
     uuid.parse(id);
-    if (dealId) {
-      const deal = await DealModel.findById(dealId);
-      if (!deal) {
-        throw new HttpError(400, "Deal not found");
-      }
-    }
+    await assertDeal(dealId);
     const updated = await CallModel.updateDeal(id, dealId);
     if (!updated) {
       throw new HttpError(404, "Call not found");
@@ -58,63 +75,44 @@ export const CallService = {
   async createFromUpload(input: {
     originalName: string;
     storedName: string;
-    repId: string;
     dealId?: string | null;
+    uploadedBy?: string | null;
   }) {
-    uuid.parse(input.repId);
-    const rep = await RepModel.findById(input.repId);
-    if (!rep) {
-      throw new HttpError(400, "Rep not found");
-    }
-    if (input.dealId) {
-      uuid.parse(input.dealId);
-      const deal = await DealModel.findById(input.dealId);
-      if (!deal) {
-        throw new HttpError(400, "Deal not found");
-      }
-    }
+    await assertDeal(input.dealId);
 
     const filename = basename(input.originalName);
     const label = sanitizeLabel(filename.replace(/\.[^/.]+$/, "")) || "Uploaded call";
 
-    return CallModel.create({
+    const call = await CallModel.create({
       dealId: input.dealId ?? null,
-      repId: input.repId,
+      uploadedBy: input.uploadedBy ?? null,
       label,
       filename,
       storagePath: input.storedName,
       status: "processing",
-      statusColor: "neutral",
-      verdict: "Processing",
-      analysis: emptyAnalysis(),
     });
+
+    if (!call) {
+      throw new HttpError(500, "Could not create call", false);
+    }
+
+    startTranscription(call.id);
+    return call;
   },
 
-  async createFromLink(input: z.infer<typeof linkCallSchema>) {
-    const rep = await RepModel.findById(input.repId);
-    if (!rep) {
-      throw new HttpError(400, "Rep not found");
-    }
-    if (input.dealId) {
-      const deal = await DealModel.findById(input.dealId);
-      if (!deal) {
-        throw new HttpError(400, "Deal not found");
-      }
-    }
+  async createFromLink(input: z.infer<typeof linkCallSchema> & { uploadedBy?: string | null }) {
+    await assertDeal(input.dealId);
 
     const host = new URL(input.url).hostname.replace(/^www\./, "");
     const label = sanitizeLabel(input.label || `Linked call — ${host}`);
 
     return CallModel.create({
       dealId: input.dealId ?? null,
-      repId: input.repId,
+      uploadedBy: input.uploadedBy ?? null,
       label,
       filename: input.url,
       sourceUrl: input.url,
       status: "processing",
-      statusColor: "neutral",
-      verdict: "Processing",
-      analysis: emptyAnalysis(),
     });
   },
 };
@@ -126,11 +124,5 @@ export const DealService = {
 
   async create(name: string, createdBy?: string) {
     return DealModel.create({ name: sanitizeLabel(name), createdBy });
-  },
-};
-
-export const RepService = {
-  list() {
-    return RepModel.list();
   },
 };

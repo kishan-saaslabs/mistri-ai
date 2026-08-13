@@ -1,6 +1,10 @@
 import type { Request, Response } from "express";
 import { UserModel, toPublicUser } from "../models/userModel.js";
-import { AuthService, loginSchema, registerSchema } from "../services/authService.js";
+import {
+  AuthService,
+  loginSchema,
+  registerSchema,
+} from "../services/authService.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { HttpError } from "../utils/httpError.js";
 

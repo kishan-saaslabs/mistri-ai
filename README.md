@@ -20,7 +20,7 @@ pnpm install
 cp .env.example .env
 ```
 
-Set `POSTGRES_PASSWORD` and `JWT_SECRET` in `.env`. `JWT_SECRET` must be at least 32 characters:
+Set `POSTGRES_PASSWORD`, `JWT_SECRET` (32+ characters), and `PYAI_API_KEY` in `.env`.
 
 ```bash
 # example — run locally, do not commit the output
@@ -62,12 +62,14 @@ Authenticated routes expect `Authorization: Bearer <token>`.
 | `POST` | `/api/auth/register` | email, password (min 10), name |
 | `POST` | `/api/auth/login` | |
 | `GET` | `/api/auth/me` | |
-| `GET` | `/api/reps` | |
 | `GET`/`POST` | `/api/deals` | |
+| `GET` | `/api/deals/:id/calls` | calls for one deal |
 | `GET` | `/api/calls` | |
-| `GET`/`PATCH` | `/api/calls/:id` | patch maps a call to a deal |
-| `POST` | `/api/calls/upload` | multipart field `file` (Multer) |
-| `POST` | `/api/calls/link` | JSON `{ url, repId, dealId? }` |
+| `GET`/`PATCH` | `/api/calls/:id` | GET includes `transcriptions`; PATCH maps `dealId` |
+| `GET` | `/api/calls/:id/transcriptions` | JSON array of segment objects |
+| `POST` | `/api/calls/:id/transcribe` | re-run PyAI Hear on the stored file |
+| `POST` | `/api/calls/upload` | multipart `file` + optional `dealId`; transcribes via PyAI |
+| `POST` | `/api/calls/link` | JSON `{ url, dealId? }` |
 
 Passwords are hashed with bcryptjs. JWT secrets and database credentials come from the environment only.
 

@@ -18,7 +18,7 @@ Thanks for helping build an open-source alternative to Gong. This document cover
    pnpm install
    ```
 
-3. Copy `.env.example` to `.env` and set `POSTGRES_PASSWORD`, `JWT_SECRET` (at least 32 random characters), and `SEED_USER_PASSWORD` (min 10 characters) if you run the seed.
+3. Copy `.env.example` to `.env` and set `POSTGRES_PASSWORD`, `JWT_SECRET` (at least 32 random characters), `PYAI_API_KEY`, and `SEED_USER_PASSWORD` (min 10 characters) if you run the seed.
 4. Start Postgres and apply schema:
 
    ```bash
