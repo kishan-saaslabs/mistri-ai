@@ -51,7 +51,7 @@ The UI ships with demo call data so you can explore Calls, Deals, and Ask Mistri
 | `pnpm typecheck` | Typecheck both apps |
 | `pnpm db:up` | Start Postgres via Docker Compose |
 | `pnpm db:migrate` | Apply SQL schema |
-| `pnpm db:seed` | Insert demo reps and calls |
+| `pnpm db:seed` | Insert demo users and deals (`SEED_USER_PASSWORD` required) |
 
 ## API shape
 
