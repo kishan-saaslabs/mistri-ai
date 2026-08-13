@@ -1,3 +1,4 @@
+import type pg from "pg";
 import { queryOne } from "../config/database.js";
 
 export const USER_ROLES = ["OWNER", "ADMIN", "TEAM_MEMBER"] as const;
@@ -18,6 +19,7 @@ export type UserRecord = {
   password_hash: string;
   name: string;
   org: string | null;
+  organization_id: string;
   role: UserRole;
   created_at: Date;
 };
@@ -27,6 +29,7 @@ export type PublicUser = {
   email: string;
   name: string;
   org: string | null;
+  organizationId: string;
   role: UserRole;
   createdAt: Date;
 };
@@ -37,6 +40,7 @@ export function toPublicUser(row: UserRecord): PublicUser {
     email: row.email,
     name: row.name,
     org: row.org,
+    organizationId: row.organization_id,
     role: row.role,
     createdAt: row.created_at,
   };
@@ -51,24 +55,30 @@ export const UserModel = {
     return queryOne<UserRecord>("SELECT * FROM users WHERE id = $1", [id]);
   },
 
-  create(input: {
-    email: string;
-    passwordHash: string;
-    name: string;
-    org?: string;
-    role?: UserRole;
-  }) {
+  create(
+    input: {
+      email: string;
+      passwordHash: string;
+      name: string;
+      org?: string;
+      organizationId: string;
+      role?: UserRole;
+    },
+    client?: pg.PoolClient,
+  ) {
     return queryOne<UserRecord>(
-      `INSERT INTO users (email, password_hash, name, org, role)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO users (email, password_hash, name, org, organization_id, role)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
       [
         input.email.toLowerCase(),
         input.passwordHash,
         input.name,
         input.org ?? null,
+        input.organizationId,
         input.role ?? DEFAULT_USER_ROLE,
       ],
+      client,
     );
   },
 };

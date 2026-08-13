@@ -4,10 +4,18 @@ import { env } from "../config/env.js";
 import { isUserRole, type UserRole } from "../models/userModel.js";
 import { HttpError } from "../utils/httpError.js";
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_RE.test(value);
+}
+
 export type AuthUser = {
   id: string;
   email: string;
   role: UserRole;
+  organizationId: string;
 };
 
 declare global {
@@ -22,11 +30,16 @@ type AccessTokenPayload = {
   sub: string;
   email: string;
   role: UserRole;
+  organization_id: string;
 };
 
 export function signAccessToken(user: AuthUser): string {
   return jwt.sign(
-    { email: user.email, role: user.role } satisfies Omit<AccessTokenPayload, "sub">,
+    {
+      email: user.email,
+      role: user.role,
+      organization_id: user.organizationId,
+    } satisfies Omit<AccessTokenPayload, "sub">,
     env.JWT_SECRET,
     {
       subject: user.id,
@@ -37,7 +50,7 @@ export function signAccessToken(user: AuthUser): string {
 
 export function requireAuth(req: Request, _res: Response, next: NextFunction) {
   const header = req.headers.authorization;
-  if (!header || !header.startsWith("Bearer ")) {
+  if (!header?.startsWith("Bearer ")) {
     next(new HttpError(401, "Authentication required"));
     return;
   }
@@ -53,12 +66,18 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction) {
     if (
       typeof payload.sub !== "string" ||
       typeof payload.email !== "string" ||
-      !isUserRole(payload.role)
+      !isUserRole(payload.role) ||
+      !isUuid(payload.organization_id)
     ) {
       next(new HttpError(401, "Invalid token"));
       return;
     }
-    req.user = { id: payload.sub, email: payload.email, role: payload.role };
+    req.user = {
+      id: payload.sub,
+      email: payload.email,
+      role: payload.role,
+      organizationId: payload.organization_id,
+    };
     next();
   } catch {
     next(new HttpError(401, "Invalid or expired token"));

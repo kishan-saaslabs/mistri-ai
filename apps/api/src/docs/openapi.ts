@@ -55,7 +55,8 @@ export const openApiSpec = {
           id: { type: "string", format: "uuid" },
           email: { type: "string", format: "email" },
           name: { type: "string" },
-          org: { type: "string", nullable: true },
+          org: { type: "string", nullable: true, description: "Organization name" },
+          organizationId: { type: "string", format: "uuid" },
           role: { type: "string", enum: ["OWNER", "ADMIN", "TEAM_MEMBER"] },
           createdAt: { type: "string", format: "date-time" },
         },
@@ -64,7 +65,7 @@ export const openApiSpec = {
         type: "object",
         properties: {
           user: { $ref: "#/components/schemas/User" },
-          token: { type: "string", description: "JWT access token (sub, email, role). Send as Authorization: Bearer <token>." },
+          token: { type: "string", description: "JWT access token (sub, email, role, organization_id). Send as Authorization: Bearer <token>." },
         },
       },
       RegisterRequest: {
@@ -74,7 +75,11 @@ export const openApiSpec = {
           email: { type: "string", format: "email", maxLength: 320 },
           password: { type: "string", minLength: 10, maxLength: 200 },
           name: { type: "string", minLength: 1, maxLength: 120 },
-          org: { type: "string", maxLength: 120 },
+          org: {
+            type: "string",
+            maxLength: 120,
+            description: "Organization name. A new organization is created on signup. Defaults to \"{name}'s organization\" if omitted.",
+          },
           role: {
             type: "string",
             enum: ["OWNER", "ADMIN", "TEAM_MEMBER"],
@@ -94,6 +99,7 @@ export const openApiSpec = {
         type: "object",
         properties: {
           id: { type: "string", format: "uuid" },
+          organization_id: { type: "string", format: "uuid" },
           name: { type: "string" },
           created_by: { type: "string", format: "uuid", nullable: true },
           created_at: { type: "string", format: "date-time" },
@@ -110,6 +116,7 @@ export const openApiSpec = {
         type: "object",
         properties: {
           id: { type: "string", format: "uuid" },
+          organization_id: { type: "string", format: "uuid" },
           deal_id: { type: "string", format: "uuid", nullable: true },
           uploaded_by: { type: "string", format: "uuid", nullable: true },
           label: { type: "string" },
@@ -264,7 +271,7 @@ export const openApiSpec = {
         tags: ["Deals"],
         summary: "List deals",
         description:
-          "OWNER and ADMIN see all deals. TEAM_MEMBER sees only deals they are mapped to in user_deals.",
+          "OWNER and ADMIN see all deals in their organization. TEAM_MEMBER sees only deals they are mapped to in user_deals.",
         security: [{ bearerAuth: [] }],
         responses: {
           "200": {
@@ -395,7 +402,7 @@ export const openApiSpec = {
         tags: ["Calls"],
         summary: "List calls",
         description:
-          "OWNER and ADMIN see all calls. TEAM_MEMBER sees calls on mapped deals plus their own unassigned uploads.",
+          "OWNER and ADMIN see all calls in their organization. TEAM_MEMBER sees calls on mapped deals plus their own unassigned uploads.",
         security: [{ bearerAuth: [] }],
         responses: {
           "200": {

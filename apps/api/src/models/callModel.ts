@@ -2,6 +2,7 @@ import { query, queryOne } from "../config/database.js";
 
 export type CallRecord = {
   id: string;
+  organization_id: string;
   deal_id: string | null;
   uploaded_by: string | null;
   label: string;
@@ -14,6 +15,7 @@ export type CallRecord = {
 };
 
 export type CallInsert = {
+  organizationId: string;
   dealId?: string | null;
   uploadedBy?: string | null;
   label: string;
@@ -25,29 +27,37 @@ export type CallInsert = {
 };
 
 export const CallModel = {
-  list() {
-    return query<CallRecord>("SELECT * FROM calls ORDER BY created_at DESC");
-  },
-
-  listForUser(userId: string) {
+  listForOrg(organizationId: string) {
     return query<CallRecord>(
-      `SELECT c.*
-       FROM calls c
-       WHERE (
-         c.deal_id IS NOT NULL AND EXISTS (
-           SELECT 1 FROM user_deals ud
-           WHERE ud.deal_id = c.deal_id AND ud.user_id = $1
-         )
-       ) OR (
-         c.deal_id IS NULL AND c.uploaded_by = $1
-       )
-       ORDER BY c.created_at DESC`,
-      [userId],
+      "SELECT * FROM calls WHERE organization_id = $1 ORDER BY created_at DESC",
+      [organizationId],
     );
   },
 
-  listByDeal(dealId: string) {
-    return query<CallRecord>("SELECT * FROM calls WHERE deal_id = $1 ORDER BY created_at DESC", [dealId]);
+  listForUser(userId: string, organizationId: string) {
+    return query<CallRecord>(
+      `SELECT c.*
+       FROM calls c
+       WHERE c.organization_id = $2 AND (
+         (
+           c.deal_id IS NOT NULL AND EXISTS (
+             SELECT 1 FROM user_deals ud
+             WHERE ud.deal_id = c.deal_id AND ud.user_id = $1
+           )
+         ) OR (
+           c.deal_id IS NULL AND c.uploaded_by = $1
+         )
+       )
+       ORDER BY c.created_at DESC`,
+      [userId, organizationId],
+    );
+  },
+
+  listByDeal(dealId: string, organizationId: string) {
+    return query<CallRecord>(
+      "SELECT * FROM calls WHERE deal_id = $1 AND organization_id = $2 ORDER BY created_at DESC",
+      [dealId, organizationId],
+    );
   },
 
   findById(id: string) {
@@ -57,10 +67,11 @@ export const CallModel = {
   create(input: CallInsert) {
     return queryOne<CallRecord>(
       `INSERT INTO calls (
-         deal_id, uploaded_by, label, filename, duration_seconds, status, storage_path, source_url
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         organization_id, deal_id, uploaded_by, label, filename, duration_seconds, status, storage_path, source_url
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING *`,
       [
+        input.organizationId,
         input.dealId ?? null,
         input.uploadedBy ?? null,
         input.label,

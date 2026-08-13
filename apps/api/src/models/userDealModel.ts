@@ -13,6 +13,7 @@ export type DealMemberRow = {
   email: string;
   name: string;
   org: string | null;
+  organization_id: string;
   role: UserRole;
   created_at: Date;
 };
@@ -36,7 +37,7 @@ export const UserDealModel = {
 
   listMembers(dealId: string) {
     return query<DealMemberRow>(
-      `SELECT u.id, u.email, u.name, u.org, u.role, u.created_at
+      `SELECT u.id, u.email, u.name, u.org, u.organization_id, u.role, u.created_at
        FROM user_deals ud
        INNER JOIN users u ON u.id = ud.user_id
        WHERE ud.deal_id = $1

@@ -49,16 +49,20 @@ function isUniqueViolation(error: unknown): boolean {
 
 async function loadActor(userId: string): Promise<UserRecord> {
   const user = await UserModel.findById(userId);
-  if (!user || !isUserRole(user.role)) {
+  if (!user || !isUserRole(user.role) || !user.organization_id) {
     throw new HttpError(401, "Authentication required");
   }
   return user;
 }
 
+function sameOrg(actor: UserRecord, organizationId: string | null | undefined): boolean {
+  return Boolean(organizationId) && actor.organization_id === organizationId;
+}
+
 async function assertDealAccess(actor: UserRecord, dealId: string): Promise<DealRecord> {
   uuid.parse(dealId);
   const deal = await DealModel.findById(dealId);
-  if (!deal) {
+  if (!deal || !sameOrg(actor, deal.organization_id)) {
     throw new HttpError(404, "Deal not found");
   }
   if (canSeeAllDeals(actor.role)) {
@@ -75,7 +79,7 @@ async function assertCanAssignDeal(actor: UserRecord, dealId: string | null | un
   if (!dealId) return;
   uuid.parse(dealId);
   const deal = await DealModel.findById(dealId);
-  if (!deal) {
+  if (!deal || !sameOrg(actor, deal.organization_id)) {
     throw new HttpError(400, "Deal not found");
   }
   if (canSeeAllDeals(actor.role)) {
@@ -92,6 +96,9 @@ function canShareDeal(actor: UserRecord, deal: DealRecord): boolean {
 }
 
 async function assertCallAccess(actor: UserRecord, call: CallRecord) {
+  if (!sameOrg(actor, call.organization_id)) {
+    throw new HttpError(404, "Call not found");
+  }
   if (canSeeAllDeals(actor.role)) {
     return;
   }
@@ -118,15 +125,15 @@ export const CallService = {
   async list(actorId: string) {
     const actor = await loadActor(actorId);
     if (canSeeAllDeals(actor.role)) {
-      return CallModel.list();
+      return CallModel.listForOrg(actor.organization_id);
     }
-    return CallModel.listForUser(actor.id);
+    return CallModel.listForUser(actor.id, actor.organization_id);
   },
 
   async listByDeal(actorId: string, dealId: string) {
     const actor = await loadActor(actorId);
     await assertDealAccess(actor, dealId);
-    return CallModel.listByDeal(dealId);
+    return CallModel.listByDeal(dealId, actor.organization_id);
   },
 
   async get(actorId: string, id: string) {
@@ -170,6 +177,7 @@ export const CallService = {
     const label = sanitizeLabel(filename.replace(/\.[^/.]+$/, "")) || "Uploaded call";
 
     const call = await CallModel.create({
+      organizationId: actor.organization_id,
       dealId: input.dealId ?? null,
       uploadedBy: input.uploadedBy,
       label,
@@ -194,6 +202,7 @@ export const CallService = {
     const label = sanitizeLabel(input.label || `Linked call — ${host}`);
 
     return CallModel.create({
+      organizationId: actor.organization_id,
       dealId: input.dealId ?? null,
       uploadedBy: input.uploadedBy,
       label,
@@ -208,14 +217,18 @@ export const DealService = {
   async list(actorId: string) {
     const actor = await loadActor(actorId);
     if (canSeeAllDeals(actor.role)) {
-      return DealModel.list();
+      return DealModel.listForOrg(actor.organization_id);
     }
-    return DealModel.listForUser(actor.id);
+    return DealModel.listForUser(actor.id, actor.organization_id);
   },
 
   async create(name: string, createdBy: string) {
-    await loadActor(createdBy);
-    const deal = await DealModel.create({ name: sanitizeLabel(name), createdBy });
+    const actor = await loadActor(createdBy);
+    const deal = await DealModel.create({
+      name: sanitizeLabel(name),
+      createdBy,
+      organizationId: actor.organization_id,
+    });
     if (!deal) {
       throw new HttpError(500, "Could not create deal", false);
     }
@@ -231,6 +244,7 @@ export const DealService = {
       email: row.email,
       name: row.name,
       org: row.org,
+      organizationId: row.organization_id,
       role: row.role,
       createdAt: row.created_at,
     }));
@@ -241,7 +255,7 @@ export const DealService = {
     uuid.parse(userId);
     const actor = await loadActor(actorId);
     const deal = await DealModel.findById(dealId);
-    if (!deal) {
+    if (!deal || !sameOrg(actor, deal.organization_id)) {
       throw new HttpError(404, "Deal not found");
     }
     if (!canShareDeal(actor, deal)) {
@@ -249,7 +263,7 @@ export const DealService = {
     }
 
     const target = await UserModel.findById(userId);
-    if (!target) {
+    if (!target || !sameOrg(actor, target.organization_id)) {
       throw new HttpError(400, "User not found");
     }
 
