@@ -118,6 +118,12 @@ function prettySpeaker(raw: string) {
   return raw.replace(/_/g, " ");
 }
 
+function displaySpeaker(seg: TranscriptSegment) {
+  const named = seg.speakerName?.trim();
+  if (named) return named;
+  return prettySpeaker(speakerKey(seg.speaker));
+}
+
 function shortId(id: string) {
   return id.replaceAll("-", "").slice(0, 8);
 }
@@ -130,7 +136,7 @@ function modelLabel(model: string | undefined) {
 function uniqueSpeakerKeys(segments: TranscriptSegment[]) {
   const keys: string[] = [];
   for (const seg of segments) {
-    const key = speakerKey(seg.speaker);
+    const key = displaySpeaker(seg);
     if (!keys.includes(key)) keys.push(key);
   }
   return keys;
@@ -143,7 +149,7 @@ function toneFor(key: string, keys: string[]) {
 
 function resolveSeg(
   segId: string,
-  segments: TranscriptSegment[],
+  segments: TranscriptSegment[]
 ): TranscriptSegment | undefined {
   const byId = segments.find((seg) => seg.id === segId);
   if (byId) return byId;
@@ -178,7 +184,7 @@ function segmentAtTime(segments: TranscriptSegment[], time: number) {
 function segmentEnd(seg: TranscriptSegment, segments: TranscriptSegment[]) {
   if (seg.end != null) return seg.end;
   const index = segments.findIndex((row) => row.id === seg.id);
-  return index >= 0 ? (segments[index + 1]?.start ?? null) : null;
+  return index >= 0 ? segments[index + 1]?.start ?? null : null;
 }
 
 type Evidence = {
@@ -214,7 +220,7 @@ type ExportFormat = "markdown" | "json";
 
 function transcriptLines(segments: TranscriptSegment[]) {
   return segments.map((seg) => ({
-    Speaker: prettySpeaker(speakerKey(seg.speaker)),
+    Speaker: displaySpeaker(seg),
     time: seg.start != null ? formatDuration(seg.start) : "—",
     text: seg.text,
   }));
@@ -252,7 +258,7 @@ function intelExport(pending: boolean) {
 function toExportJson(
   scope: ExportScope,
   segments: TranscriptSegment[],
-  pending: boolean,
+  pending: boolean
 ) {
   const out: Record<string, unknown> = {};
   if (scope === "transcript" || scope === "both") {
@@ -268,7 +274,7 @@ function toExportMarkdown(
   title: string,
   scope: ExportScope,
   segments: TranscriptSegment[],
-  pending: boolean,
+  pending: boolean
 ) {
   const lines = [`# ${title}`, ""];
   if (scope === "transcript" || scope === "both") {
@@ -294,7 +300,7 @@ function toExportMarkdown(
       intel.Summary.description,
       "",
       intel.Summary.segment,
-      "",
+      ""
     );
     lines.push(
       "### Objections",
@@ -304,7 +310,7 @@ function toExportMarkdown(
       intel.Objections.description,
       "",
       intel.Objections.segment,
-      "",
+      ""
     );
     lines.push(
       "### Intent",
@@ -312,7 +318,7 @@ function toExportMarkdown(
       `**${intel.Intent.title}**`,
       "",
       intel.Intent.segment,
-      "",
+      ""
     );
     lines.push("### Next steps", "");
     for (const step of intel["Next steps"]) {
@@ -325,7 +331,7 @@ function toExportMarkdown(
       `**${intel["Follow-up email"].subject}**`,
       "",
       intel["Follow-up email"].body,
-      "",
+      ""
     );
   }
   return lines.join("\n").trimEnd() + "\n";
@@ -364,7 +370,7 @@ export function CallDetailView() {
   const transcription = data ? latestTranscription(data.transcriptions) : null;
   const segments = useMemo(
     () => visibleSegments(transcription),
-    [transcription],
+    [transcription]
   );
   const speakerKeys = useMemo(() => uniqueSpeakerKeys(segments), [segments]);
   const activeId = activePlayId ?? highlightId;
@@ -408,7 +414,7 @@ export function CallDetailView() {
         : fromTranscript || snippet || "—";
     setEvidence({
       segId,
-      speaker: target ? speakerKey(target.speaker) : "speaker_1",
+      speaker: target ? displaySpeaker(target) : "speaker_1",
       time: target?.start != null ? formatDuration(target.start) : "—",
       quote,
       targetId: target?.id ?? null,
@@ -520,7 +526,7 @@ export function CallDetailView() {
             <span
               className={cn(
                 "font-mono text-[10.5px]",
-                pending ? "text-warning" : "text-muted-foreground",
+                pending ? "text-warning" : "text-muted-foreground"
               )}
             >
               {pending
@@ -528,7 +534,10 @@ export function CallDetailView() {
                 : `${segments.length} line${segments.length === 1 ? "" : "s"}`}
             </span>
           </header>
-          <div ref={listRef} className="relative min-h-0 flex-1 overflow-y-auto">
+          <div
+            ref={listRef}
+            className="relative min-h-0 flex-1 overflow-y-auto"
+          >
             {pending && segments.length === 0 ? (
               <div className="min-h-[220px]">
                 {Array.from({ length: 6 }, (_, i) => (
@@ -552,49 +561,52 @@ export function CallDetailView() {
             ) : (
               <MorphIn>
                 {segments.map((seg) => {
-                const key = speakerKey(seg.speaker);
-                const tone = toneFor(key, speakerKeys);
-                return (
-                  <button
-                    key={seg.id}
-                    id={`row-${seg.id}`}
-                    type="button"
-                    onClick={() => {
-                      setHighlightId(seg.id);
-                      if (seg.start != null) {
-                        requestSeek(seg.start, segmentEnd(seg, segments));
-                      }
-                    }}
-                    className={cn(
-                      "relative grid w-full grid-cols-[48px_1fr] gap-2.5 border-l-2 px-4 py-2.5 text-left",
-                      tone.border,
-                    )}
-                  >
-                    {activeId === seg.id ? (
-                      <motion.span
-                        layoutId={`transcript-active-${id}`}
-                        className="absolute inset-0 bg-brand-tint"
-                        transition={motionTransition(reduce, springs.highlight)}
-                      />
-                    ) : null}
-                    <div className="relative z-1 pt-0.5 font-mono text-[11px] text-muted-foreground">
-                      {seg.start != null ? formatDuration(seg.start) : "—"}
-                    </div>
-                    <div className="relative z-1">
-                      <span
-                        className={cn(
-                          "mb-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
-                          tone.pill,
-                        )}
-                      >
-                        {prettySpeaker(key)}
-                      </span>
-                      <p className="mt-1 text-[13.5px] leading-normal">
-                        {seg.text}
-                      </p>
-                    </div>
-                  </button>
-                );
+                  const key = speakerKey(seg.speaker);
+                  const tone = toneFor(key, speakerKeys);
+                  return (
+                    <button
+                      key={seg.id}
+                      id={`row-${seg.id}`}
+                      type="button"
+                      onClick={() => {
+                        setHighlightId(seg.id);
+                        if (seg.start != null) {
+                          requestSeek(seg.start, segmentEnd(seg, segments));
+                        }
+                      }}
+                      className={cn(
+                        "relative grid w-full grid-cols-[48px_1fr] gap-2.5 border-l-2 px-4 py-2.5 text-left",
+                        tone.border
+                      )}
+                    >
+                      {activeId === seg.id ? (
+                        <motion.span
+                          layoutId={`transcript-active-${id}`}
+                          className="absolute inset-0 bg-brand-tint"
+                          transition={motionTransition(
+                            reduce,
+                            springs.highlight
+                          )}
+                        />
+                      ) : null}
+                      <div className="relative z-1 pt-0.5 font-mono text-[11px] text-muted-foreground">
+                        {seg.start != null ? formatDuration(seg.start) : "—"}
+                      </div>
+                      <div className="relative z-1">
+                        <span
+                          className={cn(
+                            "mb-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
+                            tone.pill
+                          )}
+                        >
+                          {key}
+                        </span>
+                        <p className="mt-1 text-[13.5px] leading-normal">
+                          {seg.text}
+                        </p>
+                      </div>
+                    </button>
+                  );
                 })}
               </MorphIn>
             )}
@@ -760,7 +772,7 @@ function IntelPanel({
         <span
           className={cn(
             "font-mono text-[10.5px]",
-            pending ? "text-warning" : "text-muted-foreground",
+            pending ? "text-warning" : "text-muted-foreground"
           )}
         >
           {pending ? "processing" : "shipped"}
@@ -774,7 +786,7 @@ function IntelPanel({
           <span
             className={cn(
               "size-[7px] rounded-full",
-              pending ? "animate-pulse bg-warning" : "bg-success",
+              pending ? "animate-pulse bg-warning" : "bg-success"
             )}
           />
           <span className={pending ? "text-warning" : undefined}>
@@ -918,21 +930,26 @@ function ExportMenu({
       downloadText(
         `${fileBase}.json`,
         JSON.stringify(toExportJson(scope, segments, pending), null, 2),
-        "application/json",
+        "application/json"
       );
       return;
     }
     downloadText(
       `${fileBase}.md`,
       toExportMarkdown(callLabel, scope, segments, pending),
-      "text/markdown;charset=utf-8",
+      "text/markdown;charset=utf-8"
     );
   }
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button type="button" variant="outline" size="sm" data-icon="inline-start">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-icon="inline-start"
+        >
           <FileDown className="size-3.5" />
           {format === "json" ? "JSON" : "Markdown"}
           <ChevronDown className="size-3.5" />
@@ -1097,7 +1114,7 @@ function TranscriptPlayer({
     const rect = event.currentTarget.getBoundingClientRect();
     const next = Math.min(
       1,
-      Math.max(0, (event.clientX - rect.left) / rect.width),
+      Math.max(0, (event.clientX - rect.left) / rect.width)
     );
     const at = next * total;
     clipUntil.current = null;
@@ -1114,6 +1131,7 @@ function TranscriptPlayer({
         ref={audioRef}
         src={src}
         preload="metadata"
+        crossOrigin="use-credentials"
         onPlay={() => {
           setPlaying(true);
           emitActive(audioRef.current?.currentTime ?? 0);
@@ -1162,7 +1180,11 @@ function TranscriptPlayer({
             exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
             transition={motionTransition(reduce, springs.snappy)}
           >
-            {playing ? <Pause className="size-3" /> : <Play className="size-3" />}
+            {playing ? (
+              <Pause className="size-3" />
+            ) : (
+              <Play className="size-3" />
+            )}
           </motion.span>
         </AnimatePresence>
       </motion.button>

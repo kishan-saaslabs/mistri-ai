@@ -9,8 +9,24 @@ export type PyaiTranscriptResult = {
   segments: TranscriptSegment[];
 };
 
-const POLL_INTERVAL_MS = 2_000;
-const POLL_TIMEOUT_MS = 5 * 60 * 1_000;
+const POLL_INTERVAL_MS = env.PYAI_POLL_INTERVAL_MS;
+const POLL_TIMEOUT_MS = env.PYAI_POLL_TIMEOUT_MS;
+const JOB_ID_RE = /^[A-Za-z0-9._-]{8,128}$/;
+
+export class PyaiPollTimeoutError extends Error {
+  constructor() {
+    super("Transcription is still running at the provider");
+    this.name = "PyaiPollTimeoutError";
+  }
+}
+
+function sanitizeJobId(value: unknown): string {
+  const raw = asString(value)?.trim() ?? "";
+  if (!JOB_ID_RE.test(raw)) {
+    throw new Error("PyAI did not return a valid job_id");
+  }
+  return raw;
+}
 
 function apiBase() {
   return env.PYAI_BASE_URL.replace(/\/$/, "");
@@ -172,13 +188,14 @@ async function submitJob(input: {
   if (!asString(job?.job_id)) {
     throw new Error("PyAI did not return a job_id");
   }
-  return job as PyaiJob;
+  return { ...job, job_id: sanitizeJobId(job?.job_id) } as PyaiJob;
 }
 
 async function waitForJob(jobId: string): Promise<PyaiJob> {
   const started = Date.now();
+  const id = sanitizeJobId(jobId);
   while (Date.now() - started < POLL_TIMEOUT_MS) {
-    const job = (await pyaiRequest(`${apiBase()}/v1/transcription/jobs/${jobId}`, {
+    const job = (await pyaiRequest(`${apiBase()}/v1/transcription/jobs/${encodeURIComponent(id)}`, {
       headers: authHeaders(),
     })) as PyaiJob;
 
@@ -188,13 +205,22 @@ async function waitForJob(jobId: string): Promise<PyaiJob> {
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
-  throw new Error("Transcription job timed out");
+  throw new PyaiPollTimeoutError();
 }
 
 async function resolveResult(job: PyaiJob): Promise<unknown> {
   if (job.result) return job.result;
   if (job.result_url) {
-    const res = await fetch(job.result_url);
+    let parsed: URL;
+    try {
+      parsed = new URL(job.result_url);
+    } catch {
+      throw new Error("Could not fetch transcription result");
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      throw new Error("Could not fetch transcription result");
+    }
+    const res = await fetch(parsed);
     const body = await readJson(res);
     if (!res.ok) {
       throw new Error(errorMessageFromBody(body, "Could not fetch transcription result"));
@@ -202,6 +228,27 @@ async function resolveResult(job: PyaiJob): Promise<unknown> {
     return body;
   }
   throw new Error("Completed job had neither result nor result_url");
+}
+
+function toTranscriptResult(payload: unknown): PyaiTranscriptResult {
+  const root = asRecord(payload);
+  const segments = normalizeSegments(payload);
+  const fullText =
+    asString(root?.text)?.trim() ||
+    segments.map((seg) => seg.text).join(" ").trim();
+
+  return {
+    language: asString(root?.language) ?? "en",
+    durationSeconds: asNumber(root?.audio_seconds) ?? asNumber(root?.duration),
+    fullText,
+    segments,
+  };
+}
+
+export async function finishPyaiJob(jobId: string): Promise<PyaiTranscriptResult> {
+  const job = await waitForJob(jobId);
+  const payload = await resolveResult(job);
+  return toTranscriptResult(payload);
 }
 
 export async function transcribeAudioFile(
@@ -212,7 +259,7 @@ export async function transcribeAudioFile(
     audioUrl?: string;
   },
   hooks?: {
-    onJobSubmitted?: () => Promise<void> | void;
+    onJobSubmitted?: (jobId: string) => Promise<void> | void;
   },
 ): Promise<PyaiTranscriptResult> {
   let bytes: Buffer | undefined;
@@ -227,20 +274,10 @@ export async function transcribeAudioFile(
     audioUrl: input.audioUrl,
   });
 
-  await hooks?.onJobSubmitted?.();
+  const jobId = sanitizeJobId(submitted.job_id);
+  await hooks?.onJobSubmitted?.(jobId);
 
-  const job = await waitForJob(String(submitted.job_id));
+  const job = await waitForJob(jobId);
   const payload = await resolveResult(job);
-  const root = asRecord(payload);
-  const segments = normalizeSegments(payload);
-  const fullText =
-    asString(root?.text)?.trim() ||
-    segments.map((seg) => seg.text).join(" ").trim();
-
-  return {
-    language: asString(root?.language) ?? "en",
-    durationSeconds: asNumber(root?.audio_seconds) ?? asNumber(root?.duration),
-    fullText,
-    segments,
-  };
+  return toTranscriptResult(payload);
 }

@@ -236,7 +236,7 @@ export const usersApi = {
 export const callsApi = {
   get: (id: string) => request<CallDetail>(`/calls/${id}`),
 
-  audioUrl: (id: string) => `${API_BASE}/api/calls/${id}/audio`,
+  audioUrl: (id: string) => `/api/calls/${id}/audio`,
 
   uploadToDeal: (dealId: string, file: File) => {
     const form = new FormData();

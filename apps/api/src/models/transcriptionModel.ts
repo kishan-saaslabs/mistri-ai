@@ -23,6 +23,7 @@ export type TranscriptionRecord = {
   full_text: string | null;
   segments: TranscriptSegment[];
   error: string | null;
+  provider_job_id: string | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -55,13 +56,31 @@ export const TranscriptionModel = {
     );
   },
 
-  markTranscribing(id: string) {
+  markTranscribing(id: string, jobId?: string) {
+    if (jobId) {
+      return queryOne<TranscriptionRecord>(
+        `UPDATE transcriptions
+         SET status = 'PYAI_TRANSCRIBING', provider_job_id = $2, error = NULL, updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id, jobId],
+      );
+    }
     return queryOne<TranscriptionRecord>(
       `UPDATE transcriptions
        SET status = 'PYAI_TRANSCRIBING', updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
-      [id]
+      [id],
+    );
+  },
+
+  listInFlightPyai() {
+    return query<TranscriptionRecord>(
+      `SELECT * FROM transcriptions
+       WHERE status IN ('PROCESSING', 'PYAI_TRANSCRIBING')
+         AND provider_job_id IS NOT NULL
+       ORDER BY created_at ASC`,
     );
   },
 
