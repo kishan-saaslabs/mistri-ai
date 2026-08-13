@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { setAccessTokenCookie } from "../middleware/auth.js";
+import { clearAccessTokenCookie, setAccessTokenCookie } from "../middleware/auth.js";
 import { UserModel, toPublicUser } from "../models/userModel.js";
 import {
   AuthService,
@@ -33,5 +33,10 @@ export const AuthController = {
       throw new HttpError(401, "Authentication required");
     }
     res.json({ user: toPublicUser(user) });
+  }),
+
+  logout: asyncHandler(async (_req: Request, res: Response) => {
+    clearAccessTokenCookie(res);
+    res.status(204).send();
   }),
 };

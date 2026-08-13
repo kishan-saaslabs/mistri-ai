@@ -292,6 +292,26 @@ export const openApiSpec = {
         },
       },
     },
+    "/api/auth/logout": {
+      post: {
+        tags: ["Auth"],
+        summary: "Logout",
+        description:
+          "Clears the HttpOnly `access_token` cookie. Does not revoke JWTs already issued; clients should also drop any stored Bearer token. Works without a valid session so expired cookies can still be cleared.",
+        security: [],
+        responses: {
+          "204": {
+            description: "Cookie cleared",
+            headers: {
+              "Set-Cookie": {
+                schema: { type: "string" },
+                description: "Expires the access_token cookie",
+              },
+            },
+          },
+        },
+      },
+    },
     "/api/auth/me": {
       get: {
         tags: ["Auth"],

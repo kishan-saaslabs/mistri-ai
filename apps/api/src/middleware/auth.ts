@@ -43,6 +43,11 @@ export function setAccessTokenCookie(res: Response, token: string) {
   res.cookie(ACCESS_TOKEN_COOKIE, token, accessTokenCookieOptions());
 }
 
+export function clearAccessTokenCookie(res: Response) {
+  const { maxAge: _maxAge, ...options } = accessTokenCookieOptions();
+  res.clearCookie(ACCESS_TOKEN_COOKIE, options);
+}
+
 function readCookie(cookieHeader: string | undefined, name: string): string | undefined {
   if (!cookieHeader) {
     return undefined;

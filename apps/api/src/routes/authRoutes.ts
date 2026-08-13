@@ -15,4 +15,5 @@ const authLimiter = rateLimit({
 
 authRouter.post("/register", authLimiter, AuthController.register);
 authRouter.post("/login", authLimiter, AuthController.login);
+authRouter.post("/logout", AuthController.logout);
 authRouter.get("/me", requireAuth, AuthController.me);
