@@ -11,13 +11,13 @@
     --font-mono: "Geist Mono", ui-monospace, monospace;
     --color-brand: #2f6feb;
     --color-brand-hover: #1d54c4;
-    --color-brand-tint: #eef3fe;
+    --color-brand-tint: var(--brand-tint);
     --color-success: #2f9e44;
-    --color-success-tint: #edf9ef;
+    --color-success-tint: var(--success-tint);
     --color-warning: #d9822b;
-    --color-warning-tint: #fcf3e8;
+    --color-warning-tint: var(--warning-tint);
     --color-danger: #e03131;
-    --color-danger-tint: #fdeded;
+    --color-danger-tint: var(--danger-tint);
     --color-ink-soft: var(--ink-soft);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
@@ -73,6 +73,10 @@
     --muted: oklch(0.97 0 0);
     --muted-foreground: #8f8f8f;
     --ink-soft: #4b4b4b;
+    --brand-tint: #eef3fe;
+    --success-tint: #edf9ef;
+    --warning-tint: #fcf3e8;
+    --danger-tint: #fdeded;
     --accent: oklch(0.97 0 0);
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
@@ -109,6 +113,10 @@
     --muted: oklch(0.269 0 0);
     --muted-foreground: oklch(0.708 0 0);
     --ink-soft: oklch(0.78 0 0);
+    --brand-tint: color-mix(in srgb, #2f6feb 22%, var(--background));
+    --success-tint: color-mix(in srgb, #2f9e44 22%, var(--background));
+    --warning-tint: color-mix(in srgb, #d9822b 22%, var(--background));
+    --danger-tint: color-mix(in srgb, #e03131 22%, var(--background));
     --accent: oklch(0.269 0 0);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
@@ -140,6 +148,25 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-size: 14px;
+  }
+  a[href],
+  button:not(:disabled),
+  summary,
+  label[for],
+  select:not(:disabled),
+  input[type="file"]:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"],
+  [role="menuitem"],
+  [role="option"],
+  [role="switch"],
+  [role="checkbox"],
+  [role="radio"],
+  [role="combobox"]:not([aria-disabled="true"]),
+  [role="slider"] {
+    cursor: pointer;
   }
 }
 

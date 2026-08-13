@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, ArrowUpRight, Circle, Loader2, Pause, Play } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, ChevronDown, Circle, Loader2, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,6 +9,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { formatDuration } from "@/lib/format";
 import {
   ApiError,
@@ -24,7 +30,7 @@ import { cn } from "@/lib/utils";
 
 const SPEAKER_TONES = [
   { border: "border-l-brand", pill: "bg-brand-tint text-brand" },
-  { border: "border-l-warning", pill: "bg-warning-tint text-[#8a5a17]" },
+  { border: "border-l-warning", pill: "bg-warning-tint text-warning" },
   { border: "border-l-success", pill: "bg-success-tint text-success" },
   { border: "border-l-danger", pill: "bg-danger-tint text-danger" },
 ] as const;
@@ -316,7 +322,6 @@ export function CallDetailView() {
   const [activePlayId, setActivePlayId] = useState<string | null>(null);
   const [evidence, setEvidence] = useState<Evidence | null>(null);
   const [seek, setSeek] = useState<{ at: number; n: number } | null>(null);
-  const [exportFormat, setExportFormat] = useState<ExportFormat | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -501,22 +506,20 @@ export function CallDetailView() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setExportFormat("markdown")}
-          >
-            Markdown
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setExportFormat("json")}
-          >
-            JSON
-          </Button>
+          <ExportMenu
+            format="markdown"
+            fileBase={fileBase}
+            callLabel={call.label}
+            segments={segments}
+            pending={pending}
+          />
+          <ExportMenu
+            format="json"
+            fileBase={fileBase}
+            callLabel={call.label}
+            segments={segments}
+            pending={pending}
+          />
         </div>
       </div>
 
@@ -617,17 +620,6 @@ export function CallDetailView() {
         evidence={evidence}
         onClose={() => setEvidence(null)}
         onJump={jumpToTranscript}
-      />
-      <ExportDialog
-        open={exportFormat !== null}
-        format={exportFormat ?? "markdown"}
-        fileBase={fileBase}
-        callLabel={call.label}
-        segments={segments}
-        pending={pending}
-        onOpenChange={(open) => {
-          if (!open) setExportFormat(null);
-        }}
       />
     </div>
   );
@@ -789,84 +781,51 @@ const EXPORT_SCOPES: { id: ExportScope; label: string }[] = [
   { id: "both", label: "Both" },
 ];
 
-function ExportDialog({
-  open,
+function ExportMenu({
   format,
   fileBase,
   callLabel,
   segments,
   pending,
-  onOpenChange,
 }: {
-  open: boolean;
   format: ExportFormat;
   fileBase: string;
   callLabel: string;
   segments: TranscriptSegment[];
   pending: boolean;
-  onOpenChange: (open: boolean) => void;
 }) {
-  const [scope, setScope] = useState<ExportScope>("both");
-
-  useEffect(() => {
-    if (open) setScope("both");
-  }, [open]);
-
-  function confirm() {
+  function exportScope(scope: ExportScope) {
     if (format === "json") {
       downloadText(
         `${fileBase}.json`,
         JSON.stringify(toExportJson(scope, segments, pending), null, 2),
         "application/json",
       );
-    } else {
-      downloadText(
-        `${fileBase}.md`,
-        toExportMarkdown(callLabel, scope, segments, pending),
-        "text/markdown;charset=utf-8",
-      );
+      return;
     }
-    onOpenChange(false);
+    downloadText(
+      `${fileBase}.md`,
+      toExportMarkdown(callLabel, scope, segments, pending),
+      "text/markdown;charset=utf-8",
+    );
   }
 
-  const formatLabel = format === "json" ? "JSON" : "Markdown";
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[380px]">
-        <DialogHeader>
-          <DialogTitle>Export {formatLabel}</DialogTitle>
-          <DialogDescription>
-            Choose whether to include Transcript, Intel, or both.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex gap-2">
-          {EXPORT_SCOPES.map((item) => (
-            <Button
-              key={item.id}
-              type="button"
-              variant={scope === item.id ? "default" : "outline"}
-              className="flex-1"
-              onClick={() => setScope(item.id)}
-            >
-              {item.label}
-            </Button>
-          ))}
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
-            Cancel
-          </Button>
-          <Button type="button" onClick={confirm}>
-            Export
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="outline" size="sm">
+          {format === "json" ? "JSON" : "Markdown"}
+          <ChevronDown className="size-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-36">
+        {EXPORT_SCOPES.map((item) => (
+          <DropdownMenuItem key={item.id} onClick={() => exportScope(item.id)}>
+            {item.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
