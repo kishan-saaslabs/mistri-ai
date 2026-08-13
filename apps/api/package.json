@@ -18,6 +18,8 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@bull-board/api": "^8.6.1",
+    "@bull-board/express": "^8.6.1",
     "@mistri-ai/ai": "workspace:*",
     "@pyai/sdk": "^0.2.3",
     "bcryptjs": "^3.0.2",

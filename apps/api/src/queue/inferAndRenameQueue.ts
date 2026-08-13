@@ -1,7 +1,8 @@
 import { Queue } from "bullmq";
+import { env } from "../config/env.js";
 import { redisConnection } from "./redisConnection.js";
 
-export const INFER_AND_RENAME_QUEUE = "infer-and-rename";
+export const INFER_AND_RENAME_QUEUE = env.QUEUE_INFER_AND_RENAME_NAME;
 
 export type InferAndRenameJobData = {
   callId: string;

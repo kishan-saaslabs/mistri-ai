@@ -5,6 +5,7 @@ import morgan from "morgan";
 import { env, isProduction } from "./config/env.js";
 import { mountDocs } from "./docs/swagger.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
+import { mountBullBoard } from "./queue/bullBoard.js";
 import { apiRouter } from "./routes/apiRoutes.js";
 import { authRouter } from "./routes/authRoutes.js";
 
@@ -32,6 +33,7 @@ export function createApp() {
   });
 
   mountDocs(app);
+  mountBullBoard(app);
 
   app.use("/api/auth", authRouter);
   app.use("/api", apiRouter);

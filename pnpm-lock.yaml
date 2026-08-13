@@ -29,6 +29,12 @@ importers:
 
   apps/api:
     dependencies:
+      '@bull-board/api':
+        specifier: ^8.6.1
+        version: 8.6.1(@bull-board/ui@8.6.1(bullmq@6.1.0(ioredis@6.0.0)(pg@8.23.0)))(bullmq@6.1.0(ioredis@6.0.0)(pg@8.23.0))
+      '@bull-board/express':
+        specifier: ^8.6.1
+        version: 8.6.1(bullmq@6.1.0(ioredis@6.0.0)(pg@8.23.0))
       '@mistri-ai/ai':
         specifier: workspace:*
         version: link:../ai
@@ -312,6 +318,24 @@ packages:
   '@babel/types@7.29.8':
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
+
+  '@bull-board/api@8.6.1':
+    resolution: {integrity: sha512-v5GLzMpss8e+3AnnKRGry+9PKlm6MKU2VFxveJCSoT5+/no7WZTM5zVyjPJSG29Xwgf6CujThche6v3j4ZrmrA==}
+    peerDependencies:
+      '@bull-board/ui': 8.6.1
+      bull: ^4.16.5
+      bullmq: ^5.79.2 || ^6.0.0
+    peerDependenciesMeta:
+      bull:
+        optional: true
+      bullmq:
+        optional: true
+
+  '@bull-board/express@8.6.1':
+    resolution: {integrity: sha512-nQii+RudZAdKF1I7K8rPQ/p7iURaHyhbNdgdDA1+PHKG1zuWlavSfM2e+229cZovagseBdF19DRZ++Y0edvESA==}
+
+  '@bull-board/ui@8.6.1':
+    resolution: {integrity: sha512-RV7oDopOJEUxzjmfKoqGcYDeHZGmpnpG+h/4DOVSSGYBtK87/8tlwAuLca9SPZqYTQjbviv7qOZ4jSjke/rUmQ==}
 
   '@dotenvx/dotenvx@1.75.1':
     resolution: {integrity: sha512-/BITOC9dmS/edY2zQwZNicQ059O6RKabtQfyEafV0nGtfYRNHYy1DIPiYVcov40+tob9hfmBnbR963dS+EQ1DQ==}
@@ -1977,6 +2001,11 @@ packages:
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
 
+  ejs@6.0.1:
+    resolution: {integrity: sha512-UaaM14yby8U3k02ihS1Bmj5Kz2d7CCQM1scxpgs4Mhkq8F1wR2gl3+Ts4h5Ne4Mnt7M9m4Dw7jsuMr3+xO4vZA==}
+    engines: {node: '>=0.12.18'}
+    hasBin: true
+
   electron-to-chromium@1.5.405:
     resolution: {integrity: sha512-bNglH7lPH5l+yHOes7Zr4VqxhOy4BQ9ZBUX4VdoFgxMpzJk7W1ZoO3Vgd9Pxa9PyjQ76sfm2aKH/nzEcCNRlew==}
 
@@ -2533,6 +2562,9 @@ packages:
   lodash.once@4.1.1:
     resolution: {integrity: sha512-Sb487aTOCr9drQVL8pIxOzVhafOjZN9UU54hiN8PU3uAiSV7lx1yYNpbNmex2PK6dSJoNTSJUUswT651yww3Mg==}
 
+  lodash@4.18.1:
+    resolution: {integrity: sha512-dMInicTPVE8d1e5otfwmmjlxkZoUpiVLwyeTdUsi/Caj/gfzzblBcCE5sRHV/AsjuCmxWrte2TNGSYuCeCq+0Q==}
+
   log-symbols@6.0.0:
     resolution: {integrity: sha512-i24m8rpwhmPIS4zscNzK6MSEhk0DUWa/8iYQWxhffV8jkI4Phvs3F+quL5xvS0gdQR0FyTCMMH33Y78dDTzzIw==}
     engines: {node: '>=18'}
@@ -2959,6 +2991,9 @@ packages:
   redis-errors@1.2.0:
     resolution: {integrity: sha512-1qny3OExCf0UvUV/5wpYKf2YwPcOqXzkwKKSmKHiE6ZMQs5heeE/c8eXK+PNllPvmjgAbfnsbpkGZWy8cBpn9w==}
     engines: {node: '>=4'}
+
+  redis-info@3.1.0:
+    resolution: {integrity: sha512-ER4L9Sh/vm63DkIE0bkSjxluQlioBiBgf5w1UuldaW/3vPcecdljVDisZhmnCMvsxHNiARTTDDHGg9cGwTfrKg==}
 
   require-from-string@2.0.2:
     resolution: {integrity: sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==}
@@ -3550,6 +3585,31 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
+
+  '@bull-board/api@8.6.1(@bull-board/ui@8.6.1(bullmq@6.1.0(ioredis@6.0.0)(pg@8.23.0)))(bullmq@6.1.0(ioredis@6.0.0)(pg@8.23.0))':
+    dependencies:
+      '@bull-board/ui': 8.6.1(bullmq@6.1.0(ioredis@6.0.0)(pg@8.23.0))
+      redis-info: 3.1.0
+    optionalDependencies:
+      bullmq: 6.1.0(ioredis@6.0.0)(pg@8.23.0)
+
+  '@bull-board/express@8.6.1(bullmq@6.1.0(ioredis@6.0.0)(pg@8.23.0))':
+    dependencies:
+      '@bull-board/api': 8.6.1(@bull-board/ui@8.6.1(bullmq@6.1.0(ioredis@6.0.0)(pg@8.23.0)))(bullmq@6.1.0(ioredis@6.0.0)(pg@8.23.0))
+      '@bull-board/ui': 8.6.1(bullmq@6.1.0(ioredis@6.0.0)(pg@8.23.0))
+      ejs: 6.0.1
+      express: 5.2.1
+    transitivePeerDependencies:
+      - bull
+      - bullmq
+      - supports-color
+
+  '@bull-board/ui@8.6.1(bullmq@6.1.0(ioredis@6.0.0)(pg@8.23.0))':
+    dependencies:
+      '@bull-board/api': 8.6.1(@bull-board/ui@8.6.1(bullmq@6.1.0(ioredis@6.0.0)(pg@8.23.0)))(bullmq@6.1.0(ioredis@6.0.0)(pg@8.23.0))
+    transitivePeerDependencies:
+      - bull
+      - bullmq
 
   '@dotenvx/dotenvx@1.75.1':
     dependencies:
@@ -5026,6 +5086,8 @@ snapshots:
 
   ee-first@1.1.1: {}
 
+  ejs@6.0.1: {}
+
   electron-to-chromium@1.5.405: {}
 
   emoji-regex@10.6.0: {}
@@ -5545,6 +5607,8 @@ snapshots:
 
   lodash.once@4.1.1: {}
 
+  lodash@4.18.1: {}
+
   log-symbols@6.0.0:
     dependencies:
       chalk: 5.6.2
@@ -6003,6 +6067,10 @@ snapshots:
       tslib: 2.8.1
 
   redis-errors@1.2.0: {}
+
+  redis-info@3.1.0:
+    dependencies:
+      lodash: 4.18.1
 
   require-from-string@2.0.2: {}
 
