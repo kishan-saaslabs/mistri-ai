@@ -31,6 +31,17 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
   JWT_EXPIRES_IN: z.string().min(1).default("7d"),
   CORS_ORIGIN: z.string().url().default("http://localhost:5173"),
+  API_PUBLIC_URL: z
+    .string()
+    .optional()
+    .transform((value) => {
+      const trimmed = value?.trim() ?? "";
+      if (!trimmed) return undefined;
+      return trimmed.replace(/\/$/, "");
+    })
+    .refine((value) => value === undefined || value.startsWith("http://") || value.startsWith("https://"), {
+      message: "API_PUBLIC_URL must be an http(s) origin",
+    }),
   UPLOAD_DIR: z.string().min(1).default("uploads"),
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(50 * 1024 * 1024),
   PYAI_API_KEY: z

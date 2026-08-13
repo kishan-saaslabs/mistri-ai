@@ -1,5 +1,9 @@
-import { basename } from "node:path";
+import { existsSync } from "node:fs";
+import { basename, extname, relative, resolve, sep } from "node:path";
+import type { Request } from "express";
 import { z } from "zod";
+import { env } from "../config/env.js";
+import { uploadRoot } from "../middleware/upload.js";
 import { CallModel, type CallRecord } from "../models/callModel.js";
 import { DealModel, type DealRecord } from "../models/dealModel.js";
 import { UserDealModel } from "../models/userDealModel.js";
@@ -33,6 +37,56 @@ export const linkCallSchema = z.object({
 export const addDealUserSchema = z.object({
   userIds: z.array(z.string().uuid()).min(1).max(100),
 });
+
+const mimeByExt: Record<string, string> = {
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".m4a": "audio/mp4",
+  ".mp4": "video/mp4",
+  ".webm": "audio/webm",
+};
+
+export type PublicCall = Omit<CallRecord, "storage_path"> & {
+  fileUrl: string | null;
+};
+
+export function publicApiBase(req: Request): string {
+  if (env.API_PUBLIC_URL) {
+    return env.API_PUBLIC_URL;
+  }
+  const host = req.get("host") ?? `localhost:${env.API_PORT}`;
+  return `${req.protocol}://${host}`;
+}
+
+export function toPublicCall(call: CallRecord, apiBaseUrl: string): PublicCall {
+  const { storage_path: storagePath, ...rest } = call;
+  const base = apiBaseUrl.replace(/\/$/, "");
+  return {
+    ...rest,
+    fileUrl: storagePath ? `${base}/api/calls/${call.id}/file` : call.source_url,
+  };
+}
+
+function resolveStoredFile(storagePath: string): string {
+  const name = basename(storagePath);
+  if (!name || name !== storagePath.replaceAll("\\", "/").split("/").pop()) {
+    throw new HttpError(404, "Recording not found");
+  }
+  const absolutePath = resolve(uploadRoot, name);
+  const rel = relative(uploadRoot, absolutePath);
+  if (!rel || rel.startsWith("..") || rel.includes(`..${sep}`)) {
+    throw new HttpError(404, "Recording not found");
+  }
+  if (!existsSync(absolutePath)) {
+    throw new HttpError(404, "Recording not found");
+  }
+  return absolutePath;
+}
+
+function sanitizeDownloadName(raw: string | null, fallback: string): string {
+  const base = basename(raw || fallback).replace(/[^\w.\-]+/g, "_");
+  return base.slice(0, 120) || "recording";
+}
 
 function sanitizeLabel(raw: string) {
   return raw.replace(/[<>]/g, "").trim().slice(0, 200);
@@ -183,6 +237,26 @@ export const CallService = {
 
     startTranscription(call.id);
     return call;
+  },
+
+  async recordingFile(actorId: string, id: string) {
+    uuid.parse(id);
+    const actor = await loadActor(actorId);
+    const call = await CallModel.findById(id);
+    if (!call) {
+      throw new HttpError(404, "Call not found");
+    }
+    await assertCallAccess(actor, call);
+    if (!call.storage_path) {
+      throw new HttpError(404, "Recording not found");
+    }
+    const absolutePath = resolveStoredFile(call.storage_path);
+    const ext = extname(call.filename || call.storage_path).toLowerCase();
+    return {
+      absolutePath,
+      mimeType: mimeByExt[ext] ?? "application/octet-stream",
+      downloadName: sanitizeDownloadName(call.filename, call.storage_path),
+    };
   },
 
   async createFromLink(input: z.infer<typeof linkCallSchema> & { uploadedBy: string }) {

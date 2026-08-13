@@ -6,6 +6,8 @@ import {
   addDealUserSchema,
   createDealSchema,
   linkCallSchema,
+  publicApiBase,
+  toPublicCall,
   updateCallSchema,
 } from "../services/callService.js";
 import { TranscriptionService } from "../services/transcriptionService.js";
@@ -28,7 +30,8 @@ export const DealController = {
   listCalls: asyncHandler(async (req: Request, res: Response) => {
     const actor = requireUser(req);
     const calls = await CallService.listByDeal(actor.id, String(req.params.id));
-    res.json({ calls });
+    const base = publicApiBase(req);
+    res.json({ calls: calls.map((call) => toPublicCall(call, base)) });
   }),
 
   listUsers: asyncHandler(async (req: Request, res: Response) => {
@@ -48,20 +51,25 @@ export const DealController = {
 export const CallController = {
   list: asyncHandler(async (req: Request, res: Response) => {
     const actor = requireUser(req);
-    res.json({ calls: await CallService.list(actor.id) });
+    const calls = await CallService.list(actor.id);
+    const base = publicApiBase(req);
+    res.json({ calls: calls.map((call) => toPublicCall(call, base)) });
   }),
 
   get: asyncHandler(async (req: Request, res: Response) => {
     const actor = requireUser(req);
     const result = await CallService.get(actor.id, String(req.params.id));
-    res.json(result);
+    res.json({
+      call: toPublicCall(result.call, publicApiBase(req)),
+      transcriptions: result.transcriptions,
+    });
   }),
 
   update: asyncHandler(async (req: Request, res: Response) => {
     const actor = requireUser(req);
     const body = updateCallSchema.parse(req.body);
     const call = await CallService.mapDeal(actor.id, String(req.params.id), body.dealId);
-    res.json({ call });
+    res.json({ call: toPublicCall(call, publicApiBase(req)) });
   }),
 
   upload: asyncHandler(async (req: Request, res: Response) => {
@@ -77,14 +85,27 @@ export const CallController = {
       dealId,
       uploadedBy: actor.id,
     });
-    res.status(201).json({ call });
+    res.status(201).json({ call: toPublicCall(call, publicApiBase(req)) });
   }),
 
   link: asyncHandler(async (req: Request, res: Response) => {
     const actor = requireUser(req);
     const body = linkCallSchema.parse(req.body);
     const call = await CallService.createFromLink({ ...body, uploadedBy: actor.id });
-    res.status(201).json({ call });
+    if (!call) {
+      throw new HttpError(500, "Could not create call", false);
+    }
+    res.status(201).json({ call: toPublicCall(call, publicApiBase(req)) });
+  }),
+
+  file: asyncHandler(async (req: Request, res: Response) => {
+    const actor = requireUser(req);
+    const recording = await CallService.recordingFile(actor.id, String(req.params.id));
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Content-Type", recording.mimeType);
+    res.setHeader("Content-Disposition", `inline; filename="${recording.downloadName}"`);
+    res.sendFile(recording.absolutePath);
   }),
 
   transcriptions: asyncHandler(async (req: Request, res: Response) => {
@@ -101,6 +122,9 @@ export const CallController = {
     }
     await TranscriptionService.transcribeCall(result.call.id);
     const refreshed = await CallService.get(actor.id, result.call.id);
-    res.json(refreshed);
+    res.json({
+      call: toPublicCall(refreshed.call, publicApiBase(req)),
+      transcriptions: refreshed.transcriptions,
+    });
   }),
 };

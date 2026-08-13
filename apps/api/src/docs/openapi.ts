@@ -133,7 +133,13 @@ export const openApiSpec = {
           filename: { type: "string", nullable: true },
           duration_seconds: { type: "integer" },
           status: { type: "string", enum: ["queued", "processing", "ready", "failed"] },
-          storage_path: { type: "string", nullable: true },
+          fileUrl: {
+            type: "string",
+            format: "uri",
+            nullable: true,
+            description:
+              "Absolute URL to play the recording. Uploaded files are served at GET /api/calls/{id}/file (auth required). Linked calls use source_url.",
+          },
           source_url: { type: "string", nullable: true },
           created_at: { type: "string", format: "date-time" },
         },
@@ -614,6 +620,30 @@ export const openApiSpec = {
           "400": { description: "Invalid URL or deal" },
           "401": { description: "Authentication required" },
           "403": { description: "Not allowed to assign this deal" },
+        },
+      },
+    },
+    "/api/calls/{id}/file": {
+      get: {
+        tags: ["Calls"],
+        summary: "Play or download the uploaded recording",
+        description:
+          "Streams the stored file with Range support. Requires the same access as GET /api/calls/{id}. Use the `fileUrl` on the call object as an absolute URL.",
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+        parameters: [{ $ref: "#/components/parameters/UuidId" }],
+        responses: {
+          "200": {
+            description: "Audio or video bytes",
+            content: {
+              "audio/mpeg": { schema: { type: "string", format: "binary" } },
+              "audio/wav": { schema: { type: "string", format: "binary" } },
+              "audio/mp4": { schema: { type: "string", format: "binary" } },
+              "video/mp4": { schema: { type: "string", format: "binary" } },
+            },
+          },
+          "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to access this call" },
+          "404": { description: "Call or recording file not found" },
         },
       },
     },

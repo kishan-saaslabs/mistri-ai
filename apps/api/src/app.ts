@@ -14,7 +14,7 @@ export function createApp() {
   app.disable("x-powered-by");
   app.use(
     helmet({
-      crossOriginResourcePolicy: { policy: "same-site" },
+      crossOriginResourcePolicy: { policy: "cross-origin" },
     })
   );
   app.use(
