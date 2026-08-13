@@ -2,6 +2,7 @@ import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AskPage } from "@/pages/AskPage";
+import { CallDetailPage } from "@/pages/CallDetailPage";
 import { DealDetailPage } from "@/pages/DealDetailPage";
 import { DealsPage } from "@/pages/DealsPage";
 import { LoginPage } from "@/pages/LoginPage";
@@ -37,6 +38,7 @@ export default function App() {
           >
             <Route path="/" element={<Navigate to="/deals" replace />} />
             <Route path="/calls" element={<Navigate to="/deals" replace />} />
+            <Route path="/calls/:id" element={<CallDetailPage />} />
             <Route path="/deals" element={<DealsPage />} />
             <Route path="/deals/:id" element={<DealDetailPage />} />
             <Route path="/team" element={<TeamPage />} />
