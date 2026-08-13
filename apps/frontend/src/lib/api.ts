@@ -80,6 +80,7 @@ export type TranscriptSegment = {
   end: number | null;
   speaker: string | null;
   text: string;
+  speakerName?: string;
 };
 
 export type Transcription = {

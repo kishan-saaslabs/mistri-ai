@@ -13,6 +13,7 @@ import { existsSync } from "node:fs";
 import type { Request } from "express";
 import { env } from "../config/env.js";
 import { CallModel, type CallRecord } from "../models/callModel.js";
+import { CallTranscriptModel } from "../models/callTranscriptModel.js";
 import { DealModel, type DealRecord } from "../models/dealModel.js";
 import { UserDealModel } from "../models/userDealModel.js";
 import {
@@ -200,6 +201,27 @@ function startTranscription(callId: string) {
   });
 }
 
+async function transcriptionsForCall(call: CallRecord) {
+  const transcriptions = await TranscriptionService.listForCall(call.id);
+  if (call.status !== "LLM_SUCCESS") {
+    return transcriptions;
+  }
+
+  const namedRows = await CallTranscriptModel.listByCallId(call.id);
+  if (namedRows.length === 0) {
+    return transcriptions;
+  }
+
+  const byTranscriptionId = new Map(
+    namedRows.map((row) => [row.transcription_id, row]),
+  );
+  return transcriptions.map((row) => {
+    const named = byTranscriptionId.get(row.id);
+    if (!named) return row;
+    return { ...row, segments: named.segments };
+  });
+}
+
 export const CallService = {
   async list(actorId: string) {
     const actor = await loadActor(actorId);
@@ -228,7 +250,7 @@ export const CallService = {
 
   async get(actorId: string, id: string) {
     const call = await CallService.requireCall(actorId, id);
-    const transcriptions = await TranscriptionService.listForCall(id);
+    const transcriptions = await transcriptionsForCall(call);
     return { call, transcriptions };
   },
 

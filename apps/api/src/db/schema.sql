@@ -95,7 +95,15 @@ CREATE TABLE IF NOT EXISTS calls (
   storage_path      TEXT,
   source_url        TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT calls_status_check CHECK (status IN ('queued', 'PROCESSING', 'PYAI_SUCCESS', 'PYAI_FAILED'))
+  CONSTRAINT calls_status_check CHECK (status IN (
+    'queued',
+    'PROCESSING',
+    'PYAI_SUCCESS',
+    'PYAI_FAILED',
+    'LLM_TRANSCRIBING',
+    'LLM_SUCCESS',
+    'LLM_FAILED'
+  ))
 );
 
 ALTER TABLE calls ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations (id) ON DELETE CASCADE;
@@ -127,7 +135,15 @@ UPDATE calls SET status = 'PYAI_SUCCESS' WHERE status IN ('ready', 'PYAI_SUCCESS
 UPDATE calls SET status = 'PYAI_FAILED' WHERE status IN ('failed', 'PYAI_FAILED');
 ALTER TABLE calls ALTER COLUMN status SET DEFAULT 'PROCESSING';
 ALTER TABLE calls ADD CONSTRAINT calls_status_check
-  CHECK (status IN ('queued', 'PROCESSING', 'PYAI_SUCCESS', 'PYAI_FAILED'));
+  CHECK (status IN (
+    'queued',
+    'PROCESSING',
+    'PYAI_SUCCESS',
+    'PYAI_FAILED',
+    'LLM_TRANSCRIBING',
+    'LLM_SUCCESS',
+    'LLM_FAILED'
+  ));
 
 CREATE INDEX IF NOT EXISTS calls_deal_id_idx ON calls (deal_id);
 CREATE INDEX IF NOT EXISTS calls_created_at_idx ON calls (created_at DESC);

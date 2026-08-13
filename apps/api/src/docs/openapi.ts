@@ -132,7 +132,18 @@ export const openApiSpec = {
           label: { type: "string" },
           filename: { type: "string", nullable: true },
           duration_seconds: { type: "integer" },
-          status: { type: "string", enum: ["queued", "PROCESSING", "PYAI_SUCCESS", "PYAI_FAILED"] },
+          status: {
+            type: "string",
+            enum: [
+              "queued",
+              "PROCESSING",
+              "PYAI_SUCCESS",
+              "PYAI_FAILED",
+              "LLM_TRANSCRIBING",
+              "LLM_SUCCESS",
+              "LLM_FAILED",
+            ],
+          },
           fileUrl: {
             type: "string",
             format: "uri",
@@ -154,6 +165,10 @@ export const openApiSpec = {
           end: { type: "number", nullable: true, description: "End time in seconds" },
           speaker: { type: "string", nullable: true, description: "Diarized speaker label from PyAI Hear Telephony (e.g. speaker_0)" },
           text: { type: "string" },
+          speakerName: {
+            type: "string",
+            description: "Present when call.status is LLM_SUCCESS: resolved display name from call_transcripts",
+          },
         },
       },
       Transcription: {
@@ -713,7 +728,8 @@ export const openApiSpec = {
         parameters: [{ $ref: "#/components/parameters/UuidId" }],
         responses: {
           "200": {
-            description: "Call and its transcription rows (segments are a JSON array of objects)",
+            description:
+              "Call and its transcription rows. When call.status is PYAI_SUCCESS, segments come from transcriptions. When call.status is LLM_SUCCESS, segments come from call_transcripts (named speakers).",
             content: {
               "application/json": {
                 schema: {
@@ -796,7 +812,8 @@ export const openApiSpec = {
         parameters: [{ $ref: "#/components/parameters/UuidId" }],
         responses: {
           "200": {
-            description: "Transcription rows; each `segments` value is an array of objects",
+            description:
+              "Transcription rows. Segments come from transcriptions when call.status is PYAI_SUCCESS, and from call_transcripts when call.status is LLM_SUCCESS.",
             content: {
               "application/json": {
                 schema: {
