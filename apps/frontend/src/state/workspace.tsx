@@ -126,10 +126,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const askAboutCall = useCallback(
     (callId: string) => {
-      setAskContext(callId);
-      void navigate("/ask");
+      void navigate("/ask/new", {
+        state: {
+          attach: {
+            type: "call",
+            id: callId,
+            name: calls[callId]?.label ?? "Call",
+          },
+        },
+      });
     },
-    [navigate],
+    [calls, navigate],
   );
 
   const askQuestion = useCallback(

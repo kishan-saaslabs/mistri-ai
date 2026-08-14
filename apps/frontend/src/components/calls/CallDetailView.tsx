@@ -6,6 +6,7 @@ import {
   ArrowUpRight,
   ChevronDown,
   Circle,
+  Sparkles,
   FileDown,
   Pause,
   Play,
@@ -33,6 +34,8 @@ import {
   isPendingStatus,
   type Call,
   type CallDetail,
+  type CallInsight,
+  type InsightEvidence,
   type TranscriptSegment,
   type Transcription,
 } from "@/lib/api";
@@ -48,46 +51,6 @@ const SPEAKER_TONES = [
   { border: "border-l-danger", pill: "bg-danger-tint text-danger" },
 ] as const;
 
-// ponytail: intel is hardcoded until the analysis API exists
-const DEMO_INTEL = {
-  runStatus: "Shipped",
-  summary: {
-    title: "Ready to move forward on Pro",
-    desc: "Customer confirmed readiness to proceed with the Pro plan after discussing pricing.",
-    segId: "seg_0003",
-    quote: "we're ready to move forward with the Pro plan",
-  },
-  objection: {
-    title: "Pricing higher than today",
-    desc: "Customer said pricing is higher than their current spend.",
-    segId: "seg_0002",
-    quote: "pricing gave us pause",
-  },
-  intent: {
-    title: "Buy Pro 86%",
-    segId: "seg_0003",
-    quote: "ready to move forward with the Pro plan",
-  },
-  nextSteps: [
-    {
-      text: "Send security documentation today",
-      owner: "REP",
-      segId: "seg_0004",
-      quote: "I'll get the security docs over today",
-    },
-    {
-      text: "Review proposal and follow up Friday",
-      owner: "CUSTOMER",
-      segId: "seg_0005",
-      quote: "circle back Friday",
-    },
-  ],
-  email: {
-    subject: "Acme Pro renewal — security docs + Friday check-in",
-    body: "Hi team,",
-  },
-};
-
 const POLL_MS = 5_000;
 
 function isPending(detail: CallDetail) {
@@ -99,6 +62,16 @@ function isPending(detail: CallDetail) {
 
 function latestTranscription(rows: Transcription[]) {
   return rows[0] ?? null;
+}
+
+function canFetchInsights(row: Transcription | null) {
+  if (!row) return false;
+  return (
+    row.status === "PYAI_SUCCESS" ||
+    row.status === "LLM_TRANSCRIBING" ||
+    row.status === "LLM_SUCCESS" ||
+    row.status === "LLM_FAILED"
+  );
 }
 
 function visibleSegments(row: Transcription | null): TranscriptSegment[] {
@@ -226,46 +199,68 @@ function transcriptLines(segments: TranscriptSegment[]) {
   }));
 }
 
-function intelExport(pending: boolean) {
+function firstEvidence(evidence: InsightEvidence[]) {
+  return evidence[0];
+}
+
+function insightStatusLabel(
+  insights: CallInsight | null | undefined,
+  callPending: boolean,
+) {
+  if (insights?.status === "FAILED") return "Failed";
+  if (callPending || insights == null || insights.status === "PROCESSING") {
+    return "Processing";
+  }
+  return "Shipped";
+}
+
+function intelExport(
+  insights: CallInsight | null | undefined,
+  callPending: boolean,
+) {
   return {
-    "Run status": pending ? "Processing" : DEMO_INTEL.runStatus,
-    Summary: {
-      title: DEMO_INTEL.summary.title,
-      description: DEMO_INTEL.summary.desc,
-      segment: DEMO_INTEL.summary.segId,
-    },
-    Objections: {
-      title: DEMO_INTEL.objection.title,
-      description: DEMO_INTEL.objection.desc,
-      segment: DEMO_INTEL.objection.segId,
-    },
-    Intent: {
-      title: DEMO_INTEL.intent.title,
-      segment: DEMO_INTEL.intent.segId,
-    },
-    "Next steps": DEMO_INTEL.nextSteps.map((step) => ({
-      text: step.text,
-      owner: step.owner,
-      segment: step.segId,
+    "Run status": insightStatusLabel(insights, callPending),
+    Summary: (insights?.summary ?? []).map((item) => ({
+      title: item.title,
+      description: item.text,
+      segment: firstEvidence(item.evidence)?.segmentId ?? "—",
     })),
-    "Follow-up email": {
-      subject: DEMO_INTEL.email.subject,
-      body: DEMO_INTEL.email.body,
-    },
+    Objections: (insights?.objections ?? []).map((item) => ({
+      title: item.title,
+      description: item.text,
+      segment: firstEvidence(item.evidence)?.segmentId ?? "—",
+    })),
+    Intent: (insights?.customer_wants ?? []).map((item) => ({
+      title: item.label,
+      confidence: item.confidence,
+      segment: firstEvidence(item.evidence)?.segmentId ?? "—",
+    })),
+    "Next steps": (insights?.next_steps ?? []).map((item) => ({
+      text: item.text,
+      owner: item.owner,
+      segment: firstEvidence(item.evidence)?.segmentId ?? "—",
+    })),
+    "Follow-up email": insights?.follow_up_email
+      ? {
+          subject: insights.follow_up_email.subject,
+          body: insights.follow_up_email.body,
+        }
+      : null,
   };
 }
 
 function toExportJson(
   scope: ExportScope,
   segments: TranscriptSegment[],
-  pending: boolean
+  insights: CallInsight | null | undefined,
+  callPending: boolean,
 ) {
   const out: Record<string, unknown> = {};
   if (scope === "transcript" || scope === "both") {
     out.Transcript = transcriptLines(segments);
   }
   if (scope === "intel" || scope === "both") {
-    out.Intel = intelExport(pending);
+    out.Intel = intelExport(insights, callPending);
   }
   return out;
 }
@@ -274,7 +269,8 @@ function toExportMarkdown(
   title: string,
   scope: ExportScope,
   segments: TranscriptSegment[],
-  pending: boolean
+  insights: CallInsight | null | undefined,
+  callPending: boolean,
 ) {
   const lines = [`# ${title}`, ""];
   if (scope === "transcript" || scope === "both") {
@@ -289,50 +285,53 @@ function toExportMarkdown(
     }
   }
   if (scope === "intel" || scope === "both") {
-    const intel = intelExport(pending);
+    const intel = intelExport(insights, callPending);
     lines.push("## Intel", "");
     lines.push("### Run status", "", intel["Run status"], "");
-    lines.push(
-      "### Summary",
-      "",
-      `**${intel.Summary.title}**`,
-      "",
-      intel.Summary.description,
-      "",
-      intel.Summary.segment,
-      ""
-    );
-    lines.push(
-      "### Objections",
-      "",
-      `**${intel.Objections.title}**`,
-      "",
-      intel.Objections.description,
-      "",
-      intel.Objections.segment,
-      ""
-    );
-    lines.push(
-      "### Intent",
-      "",
-      `**${intel.Intent.title}**`,
-      "",
-      intel.Intent.segment,
-      ""
-    );
-    lines.push("### Next steps", "");
-    for (const step of intel["Next steps"]) {
-      lines.push(`- ${step.text} (${step.owner})`);
+    lines.push("### Summary", "");
+    if (intel.Summary.length === 0) {
+      lines.push("_None._", "");
+    } else {
+      for (const item of intel.Summary) {
+        lines.push(`**${item.title}**`, "", item.description, "", item.segment, "");
+      }
     }
-    lines.push("");
-    lines.push(
-      "### Follow-up email",
-      "",
-      `**${intel["Follow-up email"].subject}**`,
-      "",
-      intel["Follow-up email"].body,
-      ""
-    );
+    lines.push("### Objections", "");
+    if (intel.Objections.length === 0) {
+      lines.push("_None._", "");
+    } else {
+      for (const item of intel.Objections) {
+        lines.push(`**${item.title}**`, "", item.description, "", item.segment, "");
+      }
+    }
+    lines.push("### Intent", "");
+    if (intel.Intent.length === 0) {
+      lines.push("_None._", "");
+    } else {
+      for (const item of intel.Intent) {
+        lines.push(`**${item.title}** (${item.confidence})`, "", item.segment, "");
+      }
+    }
+    lines.push("### Next steps", "");
+    if (intel["Next steps"].length === 0) {
+      lines.push("_None._", "");
+    } else {
+      for (const step of intel["Next steps"]) {
+        lines.push(`- ${step.text} (${step.owner})`);
+      }
+      lines.push("");
+    }
+    lines.push("### Follow-up email", "");
+    if (!intel["Follow-up email"]) {
+      lines.push("_None._", "");
+    } else {
+      lines.push(
+        `**${intel["Follow-up email"].subject}**`,
+        "",
+        intel["Follow-up email"].body,
+        "",
+      );
+    }
   }
   return lines.join("\n").trimEnd() + "\n";
 }
@@ -368,6 +367,25 @@ export function CallDetailView() {
   const pending = data ? isPending(data) : false;
 
   const transcription = data ? latestTranscription(data.transcriptions) : null;
+  const transcriptionId = transcription?.id;
+  const insightsReady = canFetchInsights(transcription);
+  const insightsQuery = useQuery({
+    queryKey: queryKeys.callInsights(id, transcriptionId ?? ""),
+    queryFn: () => callsApi.insights(id),
+    enabled: Boolean(id) && insightsReady,
+    refetchInterval: (q) => {
+      if (!insightsReady) return false;
+      const row = q.state.data;
+      if (row === undefined) return false;
+      if (row == null || row.status === "PROCESSING") return POLL_MS;
+      return false;
+    },
+  });
+  const insights = insightsQuery.data;
+  const insightsLoading = insightsReady && insightsQuery.isPending;
+  const insightsError = insightsQuery.error
+    ? queryErrorMessage(insightsQuery.error)
+    : null;
   const segments = useMemo(
     () => visibleSegments(transcription),
     [transcription]
@@ -500,19 +518,36 @@ export function CallDetailView() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" size="sm" data-icon="inline-start">
+            <Link
+              to="/ask/new"
+              state={{
+                attach: {
+                  type: "call" as const,
+                  id: call.id,
+                  name: call.label,
+                },
+              }}
+            >
+              <Sparkles className="size-3.5" />
+              Ask Mistri
+            </Link>
+          </Button>
           <ExportMenu
             format="markdown"
             fileBase={fileBase}
             callLabel={call.label}
             segments={segments}
-            pending={pending}
+            insights={insights}
+            callPending={pending}
           />
           <ExportMenu
             format="json"
             fileBase={fileBase}
             callLabel={call.label}
             segments={segments}
-            pending={pending}
+            insights={insights}
+            callPending={pending}
           />
         </div>
       </div>
@@ -561,8 +596,8 @@ export function CallDetailView() {
             ) : (
               <MorphIn>
                 {segments.map((seg) => {
-                  const key = speakerKey(seg.speaker);
-                  const tone = toneFor(key, speakerKeys);
+                  const name = displaySpeaker(seg);
+                  const tone = toneFor(name, speakerKeys);
                   return (
                     <button
                       key={seg.id}
@@ -599,7 +634,7 @@ export function CallDetailView() {
                             tone.pill
                           )}
                         >
-                          {key}
+                          {name}
                         </span>
                         <p className="mt-1 text-[13.5px] leading-normal">
                           {seg.text}
@@ -622,7 +657,13 @@ export function CallDetailView() {
           ) : null}
         </section>
 
-        <IntelPanel pending={pending} onEvidence={openEvidence} />
+        <IntelPanel
+          insights={insights}
+          loading={insightsLoading || (pending && !transcriptionId)}
+          callPending={pending}
+          error={insightsError}
+          onEvidence={openEvidence}
+        />
       </div>
 
       <EvidenceModal
@@ -757,12 +798,22 @@ function CallDetailSkeleton() {
 }
 
 function IntelPanel({
-  pending,
+  insights,
+  loading,
+  callPending,
+  error,
   onEvidence,
 }: {
-  pending: boolean;
+  insights: CallInsight | null | undefined;
+  loading: boolean;
+  callPending: boolean;
+  error: string | null;
   onEvidence: (segId: string, quote?: string) => void;
 }) {
+  const status = insightStatusLabel(insights, callPending || loading);
+  const processing = status === "Processing";
+  const failed = status === "Failed";
+
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-background">
       <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
@@ -772,101 +823,219 @@ function IntelPanel({
         <span
           className={cn(
             "font-mono text-[10.5px]",
-            pending ? "text-warning" : "text-muted-foreground"
+            processing && "text-warning",
+            failed && "text-danger",
+            !processing && !failed && "text-muted-foreground",
           )}
         >
-          {pending ? "processing" : "shipped"}
+          {processing ? "processing" : failed ? "failed" : "shipped"}
         </span>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-          Run status
-        </h4>
-        <p className="mb-4 flex items-center gap-1.5 text-[13px] font-medium">
-          <span
-            className={cn(
-              "size-[7px] rounded-full",
-              pending ? "animate-pulse bg-warning" : "bg-success"
-            )}
-          />
-          <span className={pending ? "text-warning" : undefined}>
-            {pending ? "Processing" : DEMO_INTEL.runStatus}
-          </span>
-        </p>
-
-        <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-          Summary
-        </h4>
-        <InsightCard
-          bar="bg-success"
-          title={DEMO_INTEL.summary.title}
-          desc={DEMO_INTEL.summary.desc}
-          segId={DEMO_INTEL.summary.segId}
-          quote={DEMO_INTEL.summary.quote}
-          onEvidence={onEvidence}
-        />
-
-        <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-          Objections
-        </h4>
-        <InsightCard
-          bar="bg-danger"
-          title={DEMO_INTEL.objection.title}
-          desc={DEMO_INTEL.objection.desc}
-          segId={DEMO_INTEL.objection.segId}
-          quote={DEMO_INTEL.objection.quote}
-          onEvidence={onEvidence}
-        />
-
-        <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-          Intent
-        </h4>
-        <InsightCard
-          bar="bg-brand"
-          title={DEMO_INTEL.intent.title}
-          segId={DEMO_INTEL.intent.segId}
-          quote={DEMO_INTEL.intent.quote}
-          onEvidence={onEvidence}
-        />
-
-        <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-          Next steps
-        </h4>
-        <ul>
-          {DEMO_INTEL.nextSteps.map((step) => (
-            <li
-              key={step.text}
-              className="flex items-center gap-2 border-b border-border py-2 text-[12.5px] last:border-b-0"
-            >
-              <Circle className="size-3 shrink-0 text-muted-foreground" />
-              <button
-                type="button"
-                className="min-w-0 flex-1 text-left hover:text-brand"
-                onClick={() => onEvidence(step.segId, step.quote)}
-              >
-                {step.text}
-                <ArrowUpRight className="ml-0.5 inline size-3 text-brand" />
-              </button>
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground uppercase">
-                {step.owner}
-              </span>
-            </li>
-          ))}
-        </ul>
-
-        <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-          Follow-up email
-        </h4>
-        <div className="rounded-md bg-muted px-3 py-2.5">
-          <p className="text-[12.5px] font-semibold">
-            {DEMO_INTEL.email.subject}
+      {processing ? (
+        <IntelBodySkeleton />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+            Run status
+          </h4>
+          <p className="mb-4 flex items-center gap-1.5 text-[13px] font-medium">
+            <span
+              className={cn(
+                "size-[7px] rounded-full",
+                failed ? "bg-danger" : "bg-success",
+              )}
+            />
+            <span className={failed ? "text-danger" : undefined}>{status}</span>
           </p>
-          <p className="mt-1 text-[12.5px] text-ink-soft">
-            {DEMO_INTEL.email.body}
+          {failed ? (
+            <p className="mb-4 text-[12.5px] text-muted-foreground">
+              {insights?.error || error || "Insights could not be generated."}
+            </p>
+          ) : null}
+
+          <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+            Summary
+          </h4>
+          {(insights?.summary ?? []).length === 0 ? (
+            <EmptyIntel />
+          ) : (
+            <div className="space-y-3">
+              {insights!.summary.map((item) => {
+                const ev = firstEvidence(item.evidence);
+                return (
+                  <InsightCard
+                    key={`${item.title}-${ev?.segmentId ?? ""}`}
+                    bar="bg-success"
+                    title={item.title}
+                    desc={item.text}
+                    segId={ev?.segmentId}
+                    quote={ev?.quote}
+                    onEvidence={onEvidence}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+            Objections
+          </h4>
+          {(insights?.objections ?? []).length === 0 ? (
+            <EmptyIntel />
+          ) : (
+            <div className="space-y-3">
+              {insights!.objections.map((item) => {
+                const ev = firstEvidence(item.evidence);
+                return (
+                  <InsightCard
+                    key={`${item.title}-${ev?.segmentId ?? ""}`}
+                    bar="bg-danger"
+                    title={item.title}
+                    desc={item.text}
+                    segId={ev?.segmentId}
+                    quote={ev?.quote}
+                    onEvidence={onEvidence}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+            Intent
+          </h4>
+          {(insights?.customer_wants ?? []).length === 0 ? (
+            <EmptyIntel />
+          ) : (
+            <div className="space-y-3">
+              {insights!.customer_wants.map((item) => {
+                const ev = firstEvidence(item.evidence);
+                return (
+                  <InsightCard
+                    key={`${item.label}-${ev?.segmentId ?? ""}`}
+                    bar="bg-brand"
+                    title={item.label}
+                    desc={item.confidence}
+                    segId={ev?.segmentId}
+                    quote={ev?.quote}
+                    onEvidence={onEvidence}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+            Next steps
+          </h4>
+          {(insights?.next_steps ?? []).length === 0 ? (
+            <EmptyIntel />
+          ) : (
+            <ul>
+              {insights!.next_steps.map((step) => {
+                const ev = firstEvidence(step.evidence);
+                return (
+                  <li
+                    key={`${step.text}-${ev?.segmentId ?? ""}`}
+                    className="flex items-center gap-2 border-b border-border py-2 text-[12.5px] last:border-b-0"
+                  >
+                    <Circle className="size-3 shrink-0 text-muted-foreground" />
+                    {ev ? (
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left hover:text-brand"
+                        onClick={() => onEvidence(ev.segmentId, ev.quote)}
+                      >
+                        {step.text}
+                        <ArrowUpRight className="ml-0.5 inline size-3 text-brand" />
+                      </button>
+                    ) : (
+                      <span className="min-w-0 flex-1">{step.text}</span>
+                    )}
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground uppercase">
+                      {step.owner}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <h4 className="mt-4 mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+            Follow-up email
+          </h4>
+          {insights?.follow_up_email ? (
+            <div className="rounded-md bg-muted px-3 py-2.5">
+              <p className="text-[12.5px] font-semibold">
+                {insights.follow_up_email.subject}
+              </p>
+              <p className="mt-1 whitespace-pre-wrap text-[12.5px] text-ink-soft">
+                {insights.follow_up_email.body}
+              </p>
+            </div>
+          ) : (
+            <EmptyIntel />
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function EmptyIntel() {
+  return <p className="text-[12.5px] text-muted-foreground">None yet.</p>;
+}
+
+function IntelBodySkeleton() {
+  return (
+    <div className="min-h-0 flex-1 overflow-hidden p-4">
+      <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+        Run status
+      </h4>
+      <p className="mb-4 flex items-center gap-1.5 text-[13px] font-medium">
+        <span className="size-[7px] animate-pulse rounded-full bg-muted" />
+        <SkeletonLine className="w-20" />
+      </p>
+      <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+        Summary
+      </h4>
+      <div className="mb-4 flex gap-2.5">
+        <div className="w-0.5 shrink-0 self-stretch animate-pulse rounded-sm bg-muted" />
+        <div className="min-w-0 flex-1 py-0.5">
+          <div className="text-[12.5px] font-semibold">
+            <SkeletonLine className="w-[70%]" />
+          </div>
+          <p className="mt-0.5 text-xs leading-snug">
+            <SkeletonLine className="w-full" />
           </p>
         </div>
       </div>
-    </section>
+      <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+        Objections
+      </h4>
+      <div className="mb-4 flex gap-2.5">
+        <div className="w-0.5 shrink-0 self-stretch animate-pulse rounded-sm bg-muted" />
+        <div className="min-w-0 flex-1 py-0.5">
+          <div className="text-[12.5px] font-semibold">
+            <SkeletonLine className="w-[55%]" />
+          </div>
+          <p className="mt-0.5 text-xs leading-snug">
+            <SkeletonLine className="w-[90%]" />
+          </p>
+        </div>
+      </div>
+      <h4 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+        Intent
+      </h4>
+      <div className="flex gap-2.5">
+        <div className="w-0.5 shrink-0 self-stretch animate-pulse rounded-sm bg-muted" />
+        <div className="min-w-0 flex-1 py-0.5">
+          <div className="text-[12.5px] font-semibold">
+            <SkeletonLine className="w-24" />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -881,7 +1050,7 @@ function InsightCard({
   bar: string;
   title: string;
   desc?: string;
-  segId: string;
+  segId?: string;
   quote?: string;
   onEvidence: (segId: string, quote?: string) => void;
 }) {
@@ -893,14 +1062,16 @@ function InsightCard({
         {desc ? (
           <p className="mt-0.5 text-xs leading-snug text-ink-soft">{desc}</p>
         ) : null}
-        <button
-          type="button"
-          className="mt-1.5 inline-flex items-center gap-0.5 font-mono text-[10.5px] text-brand hover:underline"
-          onClick={() => onEvidence(segId, quote)}
-        >
-          <ArrowUpRight className="size-3" />
-          {segId}
-        </button>
+        {segId ? (
+          <button
+            type="button"
+            className="mt-1.5 inline-flex items-center gap-0.5 font-mono text-[10.5px] text-brand hover:underline"
+            onClick={() => onEvidence(segId, quote)}
+          >
+            <ArrowUpRight className="size-3" />
+            {segId}
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -917,27 +1088,33 @@ function ExportMenu({
   fileBase,
   callLabel,
   segments,
-  pending,
+  insights,
+  callPending,
 }: {
   format: ExportFormat;
   fileBase: string;
   callLabel: string;
   segments: TranscriptSegment[];
-  pending: boolean;
+  insights: CallInsight | null | undefined;
+  callPending: boolean;
 }) {
   function exportScope(scope: ExportScope) {
     if (format === "json") {
       downloadText(
         `${fileBase}.json`,
-        JSON.stringify(toExportJson(scope, segments, pending), null, 2),
-        "application/json"
+        JSON.stringify(
+          toExportJson(scope, segments, insights, callPending),
+          null,
+          2,
+        ),
+        "application/json",
       );
       return;
     }
     downloadText(
       `${fileBase}.md`,
-      toExportMarkdown(callLabel, scope, segments, pending),
-      "text/markdown;charset=utf-8"
+      toExportMarkdown(callLabel, scope, segments, insights, callPending),
+      "text/markdown;charset=utf-8",
     );
   }
 

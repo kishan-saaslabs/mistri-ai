@@ -12,13 +12,7 @@ Thanks for helping build an open-source alternative to Gong. This document cover
 ## Development setup
 
 1. Install [Node.js](https://nodejs.org/) 20+ and [pnpm](https://pnpm.io/) 10+.
-2. Clone the repo and install dependencies:
-
-   ```bash
-   pnpm install
-   ```
-
-3. Run bootstrap (creates `.env` if needed, starts Postgres + Redis, migrates, seeds):
+2. Clone the repo and run bootstrap (installs deps, creates `.env` if needed, starts Postgres + Redis + MinIO, migrates, seeds):
 
    ```bash
    pnpm bootstrap
@@ -26,7 +20,7 @@ Thanks for helping build an open-source alternative to Gong. This document cover
 
    Add `PYAI_API_KEY` and `LLM_API_KEY` in `.env` for live transcription and notes.
 
-4. Run both apps:
+3. Run both apps:
 
    ```bash
    pnpm dev

@@ -8,6 +8,7 @@ import { DealsPage } from "@/pages/DealsPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { RegisterPage } from "@/pages/RegisterPage";
 import { TeamPage } from "@/pages/TeamPage";
+import { AskLayout } from "@/components/ask/AskLayout";
 import { DealsLayout } from "@/components/deals/DealsLayout";
 import { AuthProvider, useAuth } from "@/state/auth";
 import { WorkspaceProvider } from "@/state/workspace";
@@ -44,7 +45,11 @@ export default function App() {
               <Route path="/calls/:id" element={<CallDetailPage />} />
             </Route>
             <Route path="/team" element={<TeamPage />} />
-            <Route path="/ask" element={<AskPage />} />
+            <Route element={<AskLayout />}>
+              <Route path="/ask" element={<AskPage />} />
+              <Route path="/ask/new" element={<AskPage />} />
+              <Route path="/ask/:conversationId" element={<AskPage />} />
+            </Route>
           </Route>
         </Route>
 

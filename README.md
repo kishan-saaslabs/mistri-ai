@@ -16,12 +16,11 @@ Mistri AI records the shape of a deal from the call itself: transcript, deal hea
 ```bash
 git clone https://github.com/kishan-saaslabs/mistri-ai.git
 cd mistri-ai
-pnpm install
 pnpm bootstrap
 pnpm dev
 ```
 
-`pnpm bootstrap` copies `.env` if needed, fills empty local secrets (`JWT_SECRET`, Postgres, MinIO, seed password), starts Postgres (pgvector), Redis, and MinIO, waits until they are healthy, migrates, and seeds. (`pnpm setup` is a pnpm CLI command and will not run this.)
+`pnpm bootstrap` runs `pnpm install`, copies `.env` if needed, fills empty local secrets (`JWT_SECRET`, Postgres, MinIO, seed password), starts Postgres (pgvector), Redis, and MinIO, waits until they are healthy, migrates, and seeds. (`pnpm setup` is a pnpm CLI command and will not run this.)
 
 Add `PYAI_API_KEY` and `LLM_API_KEY` in `.env` when you want live transcription and deal notes. For large recordings, set `S3_PUBLIC_ENDPOINT` to a public **https** origin that reaches MinIO (or use S3/R2) so PyAI can fetch the file. Do not commit `.env`.
 
@@ -39,7 +38,7 @@ The UI ships with demo call data so you can explore Calls, Deals, and Ask Mistri
 
 | Command | What it does |
 | --- | --- |
-| `pnpm bootstrap` | Create `.env` if missing, start Postgres + Redis + MinIO, migrate, seed |
+| `pnpm bootstrap` | Install deps, create `.env` if missing, start Postgres + Redis + MinIO, migrate, seed |
 | `pnpm dev` | Run API and frontend; opens a public https tunnel for PyAI large-file fetch |
 | `pnpm dev:local` | Same without the tunnel (`DEV_TUNNEL=0`) |
 | `pnpm dev:api` / `pnpm dev:frontend` | Run one app |

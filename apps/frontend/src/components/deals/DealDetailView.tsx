@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Plus, UserPlus } from "lucide-react";
+import { ArrowLeft, Plus, Sparkles, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { AddCallDialog } from "@/components/deals/AddCallDialog";
 import { Button } from "@/components/ui/button";
@@ -174,14 +174,27 @@ export function DealDetailView() {
             />
           </div>
         </div>
-        <Button
-          type="button"
-          data-icon="inline-start"
-          onClick={() => setAddOpen(true)}
-        >
-          <Plus className="size-3.5" />
-          Add call
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button asChild variant="outline" data-icon="inline-start">
+            <Link
+              to="/ask/new"
+              state={{
+                attach: { type: "deal" as const, id: deal.id, name: deal.name },
+              }}
+            >
+              <Sparkles className="size-3.5" />
+              Ask Mistri
+            </Link>
+          </Button>
+          <Button
+            type="button"
+            data-icon="inline-start"
+            onClick={() => setAddOpen(true)}
+          >
+            <Plus className="size-3.5" />
+            Add call
+          </Button>
+        </div>
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>

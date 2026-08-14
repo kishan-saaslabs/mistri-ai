@@ -1,11 +1,15 @@
 import type { AskMessage, CallRecord, Deal, Rep } from "@/types/domain";
 
 export const ASK_SUGGESTIONS = [
-  "Which reps have deals at risk right now?",
-  "How is Sarah trending this month?",
-  "What's the riskiest deal on the team?",
-  "Summarize Melissa's Northwind call",
+  "What objections came up on the latest call?",
+  "Summarize this deal in a few bullets",
+  "What are the next steps and who owns them?",
+  "What does the customer want from us?",
 ];
+
+export function chatTitle(title: string | null | undefined) {
+  return title?.trim() || "Untitled chat";
+}
 
 export function answerAskQuestion(
   text: string,

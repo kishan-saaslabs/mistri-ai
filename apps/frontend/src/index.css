@@ -198,6 +198,31 @@
   animation: morph-in 220ms ease-out both;
 }
 
+@keyframes ask-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.ask-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 38%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 62%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: ask-shimmer 1.6s linear infinite;
+}
+
 .morph-frame {
   background-color: var(--muted);
   transition: background-color 220ms ease-out;
@@ -224,8 +249,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-morph-in {
+  .animate-morph-in,
+  .ask-shimmer {
     animation: none;
+  }
+  .ask-shimmer {
+    background: none;
+    color: var(--muted-foreground);
   }
   .morph-frame {
     transition: none;

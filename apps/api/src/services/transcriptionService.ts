@@ -168,14 +168,20 @@ function pyaiFetchBase(): string | undefined {
 const LARGE_FETCH_HINT =
   "PyAI cannot fetch local MinIO and this recording is too large to upload (413). Set S3_PUBLIC_ENDPOINT (tunnel to MinIO) or PYAI_FETCH_BASE_URL (https tunnel to this API).";
 
-async function transcribeFromCall(call: {
-  id: string;
-  filename: string | null;
-  storage_path: string | null;
-  source_url: string | null;
-}, rowId: string) {
+async function transcribeFromCall(
+  call: {
+    id: string;
+    filename: string | null;
+    storage_path: string | null;
+    source_url: string | null;
+  },
+  rowId: string
+) {
   const filename = call.filename || call.storage_path || "call.mp3";
-  const mimeType = mimeForAudio(filename, mimeByExt[extname(filename).toLowerCase()]);
+  const mimeType = mimeForAudio(
+    filename,
+    mimeByExt[extname(filename).toLowerCase()]
+  );
   const linkedUrl = httpsSourceUrl(call.source_url);
 
   let audioUrl = linkedUrl;
@@ -196,7 +202,10 @@ async function transcribeFromCall(call: {
           if (meta.contentLength > PYAI_MULTIPART_MAX_BYTES) {
             throw new Error(LARGE_FETCH_HINT);
           }
-          const materialized = await materializeObjectBlob(call.storage_path, mimeType);
+          const materialized = await materializeObjectBlob(
+            call.storage_path,
+            mimeType
+          );
           blob = materialized.blob;
           cleanup = materialized.cleanup;
         }
@@ -219,7 +228,7 @@ async function transcribeFromCall(call: {
         onJobSubmitted: async (jobId) => {
           await TranscriptionModel.markTranscribing(rowId, jobId);
         },
-      },
+      }
     );
   } finally {
     await cleanup?.();

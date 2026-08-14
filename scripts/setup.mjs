@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * One-command local setup after `pnpm install`.
+ * One-command local setup: install deps, .env, Docker services, migrate, seed.
  * Does not print secrets. Does not overwrite non-empty .env values.
  */
 import { randomBytes } from "node:crypto";
@@ -199,6 +199,9 @@ async function main() {
   } catch {
     throw new Error("Docker is not running. Start Docker / OrbStack, then retry `pnpm bootstrap`.");
   }
+
+  console.log("Installing dependencies…");
+  await run("pnpm", ["install"]);
 
   const envContents = await ensureEnv();
   await mkdir(resolve(root, "uploads"), { recursive: true });
