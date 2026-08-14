@@ -135,6 +135,39 @@ export async function generateChatAnswer(input: ChatGenerationInput, client: LLM
     answer = parseShape(raw);
   }
 
+  // A well-formed answer with zero citations despite real evidence being
+  // present is suspicious, not necessarily correct. Confirmed live: the
+  // identical evidence/question/empty-history combination sometimes
+  // produces a full grounded answer and sometimes an outright refusal,
+  // nondeterministically — this is inherent LLM sampling variance, not a
+  // prompt-instruction gap (the system prompt above already tells it not to
+  // refuse when the subject is mentioned). Retrying once at a nonzero
+  // temperature (retrying at temp 0 with the same prompt tends to reproduce
+  // the same output) recovers most false refusals. Only ACCEPT the retry if
+  // it actually produced a citation — never overwrite a genuine "nothing
+  // relevant" answer with a worse one, and validateCitations still gates
+  // whatever comes back either way.
+  if (answer && answer.citations.length === 0 && input.evidenceBlocks.length > 0) {
+    const retryRaw = await client.complete(
+      [
+        ...messages,
+        {
+          role: "user",
+          content:
+            "You answered with no citations even though evidence blocks were provided. Look again: does ANY " +
+            "evidence block mention the subject of the question, even indirectly (pricing, terms, how someone " +
+            "described or reacted to it)? If so, answer from it with a citation. Only keep a no-citation answer " +
+            "if truly nothing relevant is present.",
+        },
+      ],
+      { temperature: 0.4 },
+    );
+    const retryAnswer = parseShape(retryRaw);
+    if (retryAnswer && retryAnswer.citations.length > 0) {
+      answer = retryAnswer;
+    }
+  }
+
   return (
     answer ?? {
       answer: "I wasn't able to produce a well-formed, grounded answer to that — could you rephrase the question?",

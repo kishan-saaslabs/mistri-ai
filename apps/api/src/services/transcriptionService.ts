@@ -22,7 +22,6 @@ import {
 import { publishCallInsightsJob } from "../queue/callInsightsQueue.js";
 import { publishInferAndRenameJob } from "../queue/inferAndRenameQueue.js";
 import { publishKbIngestJob } from "../queue/kbIngestQueue.js";
-import { transcribeAudioFile, finishPyaiJob, PyaiPollTimeoutError } from "./pyaiHear.js";
 import {
   transcribeAudioFile,
   finishPyaiJob,

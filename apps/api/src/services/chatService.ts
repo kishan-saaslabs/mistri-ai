@@ -60,6 +60,27 @@ function fitBlocksToBudget(blocks: EvidenceBlockWithMeta[], budget: number): Evi
   return kept;
 }
 
+// Keeps only the most recent occurrence of any exact-duplicate (role,
+// content) turn. Confirmed live: a question asked verbatim several times in
+// a row (e.g. a user re-asking after a bad answer, or repeated testing)
+// stacks that identical Q/refusal pair into history multiple times — and an
+// LLM given the same "question -> refusal" example 3x in a row anchors on
+// it far more strongly than seeing it once, even with an explicit system
+// instruction not to. Collapsing to one occurrence removes the amplification
+// at the source instead of relying on the model to resist a repeated pattern.
+function dedupeRepeatedTurns(turns: ChatTurn[]): ChatTurn[] {
+  const seen = new Set<string>();
+  const kept: ChatTurn[] = [];
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i]!;
+    const key = `${turn.role}:${turn.content}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.unshift(turn);
+  }
+  return kept;
+}
+
 function renderHistory(turns: ChatTurn[], budget: number): { text: string; keptCount: number; droppedCount: number } {
   // Oldest-first drop: start from the most recent turns and add older ones
   // while there's room, so what's dropped is always the oldest.
@@ -259,10 +280,30 @@ export const ChatService = {
       focusCallIds,
     });
 
+    // An assistant turn with zero citations was ungrounded — a refusal, an
+    // empty-scope notice, or a degraded fallback. Confirmed live: showing
+    // even ONE such turn back to the model as history for the exact same
+    // question is enough to anchor a fresh, well-evidenced turn into
+    // repeating that refusal (a heavily-retested conversation with several
+    // ungrounded "the evidence doesn't cover that" turns kept reproducing
+    // the refusal on the next ask despite genuinely relevant evidence being
+    // retrieved). User turns always carry real signal (resolving pronouns/
+    // references), so only assistant turns are filtered here — EXCEPT a
+    // user turn that's just this exact question asked again verbatim: that
+    // one carries no reference to resolve, and confirmed live (6/6, even
+    // through the retry above) an unresolved verbatim repeat sitting in
+    // history bizarrely reads as "already determined unanswerable" and
+    // reliably drags a fresh, well-evidenced answer into refusing too.
+    const normalizedContent = content.trim().toLowerCase();
     const priorMessages = await MessageModel.listByConversationId(conversationId);
-    const history: ChatTurn[] = priorMessages
-      .slice(-HISTORY_TURNS_CONSIDERED)
-      .map((m) => ({ role: m.role, content: m.content }));
+    const groundedMessages = priorMessages.filter(
+      (m) =>
+        (m.role === "user" && m.content.trim().toLowerCase() !== normalizedContent) ||
+        (m.role === "assistant" && m.citations.length > 0),
+    );
+    const history: ChatTurn[] = dedupeRepeatedTurns(
+      groundedMessages.slice(-HISTORY_TURNS_CONSIDERED).map((m) => ({ role: m.role, content: m.content })),
+    );
 
     const chatClient = getChatLLMClient();
     const { standaloneQuery, isFollowup } = await contextualizeQuery(history, content, chatClient);
@@ -380,8 +421,19 @@ export const ChatService = {
     // turn's full bounded-expansion block (topic header + neighbour
     // turns) — a reasonable v1 simplification.
     const authorizedTranscriptionIds = new Set(scope.transcriptionIds);
-    const carriedPointers = (conversation.carried_evidence ?? []).filter((c) =>
-      authorizedTranscriptionIds.has(c.transcriptionId),
+    // Also drop anything already present in this turn's fresh evidence —
+    // confirmed live: the same chunk can legitimately show up in both (e.g.
+    // a repeated or similar question against a narrow scope re-retrieves
+    // the same top chunk that was also carried from a prior turn), and
+    // showing the model the identical chunkId TWICE with two different text
+    // renderings (this turn's topic-header+segment-tagged shownText vs. the
+    // carried copy's bare chunk.body) reads as self-contradictory evidence
+    // and reliably makes it refuse to answer at all rather than trust
+    // either version. Current-turn evidence is strictly more complete, so
+    // it always wins the dedupe.
+    const currentEvidenceChunkIds = new Set(currentEvidenceBlocks.map((b) => b.chunkId));
+    const carriedPointers = (conversation.carried_evidence ?? []).filter(
+      (c) => authorizedTranscriptionIds.has(c.transcriptionId) && !currentEvidenceChunkIds.has(c.chunkId),
     );
     const carriedChunks = await ChunkModel.findByIds(carriedPointers.map((c) => c.chunkId));
     const carriedEvidenceBlocks: EvidenceBlockWithMeta[] = carriedChunks.map((c) => ({
