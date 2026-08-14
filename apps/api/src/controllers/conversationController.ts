@@ -24,9 +24,15 @@ function sseWrite(res: Response, event: string, data: unknown) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+const conversationIdSchema = z.string().uuid();
+
 const listConversationsQuerySchema = z.object({
   callId: z.string().uuid().optional(),
   dealId: z.string().uuid().optional(),
+});
+
+const searchConversationsQuerySchema = listConversationsQuerySchema.extend({
+  q: z.string().trim().min(1).max(200),
 });
 
 export const ConversationController = {
@@ -47,6 +53,34 @@ export const ConversationController = {
       scopeDealId: query.dealId,
     });
     res.json({ conversations });
+  }),
+
+  search: asyncHandler(async (req: Request, res: Response) => {
+    const actor = requireUser(req);
+    const query = searchConversationsQuerySchema.parse({
+      q: typeof req.query.q === "string" ? req.query.q : undefined,
+      callId:
+        typeof req.query.callId === "string" && req.query.callId
+          ? req.query.callId
+          : undefined,
+      dealId:
+        typeof req.query.dealId === "string" && req.query.dealId
+          ? req.query.dealId
+          : undefined,
+    });
+    const conversations = await ChatService.searchConversations(actor.id, {
+      q: query.q,
+      scopeCallId: query.callId,
+      scopeDealId: query.dealId,
+    });
+    res.json({ conversations });
+  }),
+
+  remove: asyncHandler(async (req: Request, res: Response) => {
+    const actor = requireUser(req);
+    const conversationId = conversationIdSchema.parse(req.params.id);
+    await ChatService.deleteConversation(actor.id, conversationId);
+    res.status(204).send();
   }),
 
   create: asyncHandler(async (req: Request, res: Response) => {

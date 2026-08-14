@@ -1299,6 +1299,74 @@ export const openApiSpec = {
         },
       },
     },
+    "/api/conversations/search": {
+      get: {
+        tags: ["Chat"],
+        summary: "Search the current user's conversations by title",
+        description:
+          "Case-insensitive substring match on `conversations.title`. Results are limited to the signed-in user's conversations in their organization, newest activity first. Optional `callId` or `dealId` further filters to chats on that call or deal. Conversations with a null title are not returned.",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "q",
+            in: "query",
+            required: true,
+            schema: { type: "string", minLength: 1, maxLength: 200 },
+            description: "Substring to match against conversation title",
+          },
+          {
+            name: "callId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+            description: "Only conversations scoped to this call",
+          },
+          {
+            name: "dealId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+            description: "Only conversations scoped to this deal",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Matching conversations for the current user",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    conversations: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/Conversation" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "Validation failed" },
+          "401": { description: "Authentication required" },
+        },
+      },
+    },
+    "/api/conversations/{id}": {
+      delete: {
+        tags: ["Chat"],
+        summary: "Delete a conversation",
+        description:
+          "Deletes the signed-in user's conversation. Messages are removed with it (ON DELETE CASCADE). Returns 404 if the conversation does not exist or belongs to another user.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: "#/components/parameters/UuidId" }],
+        responses: {
+          "204": { description: "Conversation deleted" },
+          "400": { description: "Validation failed" },
+          "401": { description: "Authentication required" },
+          "404": { description: "Conversation not found" },
+        },
+      },
+    },
     "/api/conversations/{id}/messages": {
       get: {
         tags: ["Chat"],

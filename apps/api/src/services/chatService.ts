@@ -195,6 +195,33 @@ export const ChatService = {
     };
   },
 
+  async searchConversations(
+    actorId: string,
+    input: { q: string; scopeCallId?: string; scopeDealId?: string },
+  ) {
+    const actor = await UserModel.findById(actorId);
+    if (!actor) throw new HttpError(401, "Authentication required");
+    const rows = await ConversationModel.searchForUser({
+      userId: actor.id,
+      organizationId: actor.organization_id,
+      q: input.q,
+      scopeCallId: input.scopeCallId,
+      scopeDealId: input.scopeDealId,
+    });
+    return rows.map(toPublicConversation);
+  },
+
+  async deleteConversation(actorId: string, conversationId: string) {
+    const actor = await UserModel.findById(actorId);
+    if (!actor) throw new HttpError(401, "Authentication required");
+    const deleted = await ConversationModel.deleteForUser({
+      id: conversationId,
+      userId: actor.id,
+      organizationId: actor.organization_id,
+    });
+    if (!deleted) throw new HttpError(404, "Conversation not found");
+  },
+
   listMessages(conversationId: string) {
     return MessageModel.listByConversationId(conversationId);
   },

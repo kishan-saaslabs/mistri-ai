@@ -46,5 +46,7 @@ apiRouter.post("/search", SearchController.search);
 
 apiRouter.get("/conversations", ConversationController.list);
 apiRouter.post("/conversations", ConversationController.create);
+apiRouter.get("/conversations/search", ConversationController.search);
+apiRouter.delete("/conversations/:id", ConversationController.remove);
 apiRouter.get("/conversations/:id/messages", ConversationController.listMessages);
 apiRouter.post("/conversations/:id/messages", ConversationController.postMessage);

@@ -73,4 +73,44 @@ export const ConversationModel = {
       [id, JSON.stringify(carriedEvidence)],
     );
   },
+
+  searchForUser(input: {
+    userId: string;
+    organizationId: string;
+    q: string;
+    scopeCallId?: string;
+    scopeDealId?: string;
+  }) {
+    const params: unknown[] = [input.userId, input.organizationId, likePattern(input.q)];
+    const filters = ["user_id = $1", "organization_id = $2", String.raw`title ILIKE $3 ESCAPE '\'`];
+    if (input.scopeCallId) {
+      params.push(input.scopeCallId);
+      filters.push(`scope_call_id = $${params.length}`);
+    }
+    if (input.scopeDealId) {
+      params.push(input.scopeDealId);
+      filters.push(`scope_deal_id = $${params.length}`);
+    }
+    return query<ConversationRecord>(
+      `SELECT * FROM conversations
+       WHERE ${filters.join(" AND ")}
+       ORDER BY last_activity_at DESC
+       LIMIT 100`,
+      params,
+    );
+  },
+
+  deleteForUser(input: { id: string; userId: string; organizationId: string }) {
+    return queryOne<{ id: string }>(
+      `DELETE FROM conversations
+       WHERE id = $1 AND user_id = $2 AND organization_id = $3
+       RETURNING id`,
+      [input.id, input.userId, input.organizationId],
+    );
+  },
 };
+
+function likePattern(raw: string): string {
+  const escaped = raw.replace(/[%_\\]/g, (ch) => "\\" + ch);
+  return "%" + escaped + "%";
+}
