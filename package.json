@@ -19,8 +19,7 @@
   },
   "scripts": {
     "postinstall": "pnpm --filter @mistri-ai/ai build",
-    "dev": "node scripts/dev.mjs",
-    "dev:local": "pnpm -r --parallel --filter \"./apps/*\" dev",
+    "dev": "pnpm -r --parallel --filter \"./apps/*\" dev",
     "dev:api": "pnpm --filter @mistri-ai/api dev",
     "dev:frontend": "pnpm --filter @mistri-ai/frontend dev",
     "build": "pnpm -r --filter \"./apps/*\" build",

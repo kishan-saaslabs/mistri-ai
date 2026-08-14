@@ -80,7 +80,7 @@ async function pyaiRequest(url: string, init: RequestInit): Promise<unknown> {
   if (!res.ok) {
     if (res.status === 413) {
       throw new Error(
-        "PyAI rejected the file as too large (413). Hear must fetch it via audio_url — set S3_PUBLIC_ENDPOINT or PYAI_FETCH_BASE_URL to a public https origin.",
+        "PyAI rejected the file as too large (413). Hear must fetch it via audio_url — set S3_PUBLIC_ENDPOINT to a public https origin.",
       );
     }
     throw new Error(errorMessageFromBody(body, `PyAI request failed (${res.status})`));
@@ -190,19 +190,45 @@ async function submitJob(input: {
   return { ...job, job_id: sanitizeJobId(job?.job_id) } as PyaiJob;
 }
 
+async function fetchJob(jobId: string): Promise<PyaiJob> {
+  const id = sanitizeJobId(jobId);
+  return (await pyaiRequest(`${apiBase()}/v1/transcription/jobs/${encodeURIComponent(id)}`, {
+    headers: authHeaders(),
+  })) as PyaiJob;
+}
+
+export async function checkPyaiJob(jobId: string): Promise<
+  | { state: "completed"; result: PyaiTranscriptResult }
+  | { state: "failed"; error: string }
+  | { state: "running" }
+> {
+  const job = await fetchJob(jobId);
+  if (job.status === "completed") {
+    const payload = await resolveResult(job);
+    return { state: "completed", result: toTranscriptResult(payload) };
+  }
+  if (job.status === "failed" || job.status === "cancelled") {
+    return { state: "failed", error: job.error || `Transcription job ${job.status}` };
+  }
+  return { state: "running" };
+}
+
 async function waitForJob(jobId: string): Promise<PyaiJob> {
   const started = Date.now();
   const id = sanitizeJobId(jobId);
   while (Date.now() - started < POLL_TIMEOUT_MS) {
-    const job = (await pyaiRequest(`${apiBase()}/v1/transcription/jobs/${encodeURIComponent(id)}`, {
-      headers: authHeaders(),
-    })) as PyaiJob;
+    const job = await fetchJob(id);
 
     if (job.status === "completed") return job;
     if (job.status === "failed" || job.status === "cancelled") {
       throw new Error(job.error || `Transcription job ${job.status}`);
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+  const last = await fetchJob(id);
+  if (last.status === "completed") return last;
+  if (last.status === "failed" || last.status === "cancelled") {
+    throw new Error(last.error || `Transcription job ${last.status}`);
   }
   throw new PyaiPollTimeoutError();
 }

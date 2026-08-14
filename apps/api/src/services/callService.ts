@@ -333,8 +333,10 @@ export const CallService = {
 
   async get(actorId: string, id: string) {
     const call = await CallService.requireCall(actorId, id);
-    const transcriptions = await transcriptionsForCall(call);
-    return { call, transcriptions };
+    await TranscriptionService.syncInFlightForCall(call.id);
+    const refreshed = await CallModel.findById(call.id);
+    const transcriptions = await transcriptionsForCall(refreshed ?? call);
+    return { call: refreshed ?? call, transcriptions };
   },
 
   async audioFile(actorId: string, id: string) {

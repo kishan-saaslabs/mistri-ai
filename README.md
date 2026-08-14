@@ -32,8 +32,6 @@ Add `PYAI_API_KEY` and `LLM_API_KEY` in `.env` when you want live transcription 
 - OpenAPI JSON: http://localhost:3001/openapi.json
 - Demo login: `demo@mistri.ai` (password is `SEED_USER_PASSWORD` in `.env`)
 
-`pnpm dev` opens a Cloudflare quick tunnel to the API so PyAI can fetch large recordings. Disable with `DEV_TUNNEL=0` (or `pnpm dev:local`).
-
 The UI ships with demo call data so you can explore Calls, Deals, and Ask Mistri without wiring a live transcription pipeline. Uploads and auth persist through the API once Postgres is running.
 
 ## Workspace scripts
@@ -41,8 +39,7 @@ The UI ships with demo call data so you can explore Calls, Deals, and Ask Mistri
 | Command | What it does |
 | --- | --- |
 | `pnpm bootstrap` | Install deps, create `.env` if missing, start Postgres + Redis + MinIO, migrate, seed |
-| `pnpm dev` | Run API and frontend; opens a public https tunnel for PyAI large-file fetch |
-| `pnpm dev:local` | Same without the tunnel (`DEV_TUNNEL=0`) |
+| `pnpm dev` | Run API and frontend locally |
 | `pnpm dev:api` / `pnpm dev:frontend` | Run one app |
 | `pnpm build` | Typecheck and build both apps |
 | `pnpm typecheck` | Typecheck both apps |
