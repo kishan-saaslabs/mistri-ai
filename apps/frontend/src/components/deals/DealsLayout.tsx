@@ -240,9 +240,7 @@ function DealList({
                     layout
                     initial={reduce ? false : { opacity: 0, scale: 0.98 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    exit={
-                      reduce ? { opacity: 0 } : { opacity: 0, scale: 0.98 }
-                    }
+                    exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.98 }}
                     transition={motionTransition(reduce, springs.smooth)}
                   >
                     <NavLink
@@ -254,12 +252,14 @@ function DealList({
                           layoutId="deal-list-pill"
                           className="absolute inset-0 rounded-lg bg-brand-tint"
                           transition={motionTransition(reduce, springs.pill)}
-                        />
+                        >
+                          <span className="absolute top-1/2 left-1 h-[60%] w-[3px] -translate-y-1/2 rounded-full bg-brand" />
+                        </motion.span>
                       ) : null}
-                      <div className="relative z-1 truncate text-[13px] font-medium">
+                      <div className="relative z-1 truncate text-[13px] font-medium pl-1">
                         {deal.name}
                       </div>
-                      <div className="relative z-1 mt-0.5 text-[11px] text-muted-foreground">
+                      <div className="relative z-1 mt-0.5 text-[11px] text-muted-foreground pl-1">
                         {formatDate(deal.created_at)}
                       </div>
                     </NavLink>
