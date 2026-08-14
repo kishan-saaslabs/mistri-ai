@@ -5,7 +5,7 @@ import type {
   CallInsightObjection,
   CallInsightSummaryItem,
 } from "@mistri-ai/ai";
-import { queryOne } from "../config/database.js";
+import { query, queryOne } from "../config/database.js";
 
 export const CALL_INSIGHT_STATUSES = ["PROCESSING", "SUCCESS", "FAILED"] as const;
 export type CallInsightStatus = (typeof CALL_INSIGHT_STATUSES)[number];
@@ -30,6 +30,14 @@ export const CallInsightModel = {
     return queryOne<CallInsightRecord>(
       "SELECT * FROM call_insights WHERE transcription_id = $1",
       [transcriptionId],
+    );
+  },
+
+  listByCallIds(callIds: string[]) {
+    if (callIds.length === 0) return Promise.resolve([] as CallInsightRecord[]);
+    return query<CallInsightRecord>(
+      "SELECT * FROM call_insights WHERE call_id = ANY($1::uuid[])",
+      [callIds],
     );
   },
 
