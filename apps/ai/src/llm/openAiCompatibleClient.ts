@@ -4,6 +4,15 @@ export type OpenAiCompatibleClientConfig = {
   baseUrl: string;
   apiKey: string;
   model: string;
+  /**
+   * Explicit reasoning toggle for reasoning models (e.g. minimax-m3) that
+   * support it. undefined = don't send the field at all, use the model's
+   * own default. Sent as chat_template_kwargs.enable_thinking, the vLLM/
+   * Qwen3-style convention NIM-hosted open reasoning models tend to
+   * follow — unverified against this exact model's docs, so treat this as
+   * best-effort until confirmed live.
+   */
+  thinkingMode?: boolean;
 };
 
 /**
@@ -27,6 +36,10 @@ export class OpenAiCompatibleClient implements LLMClient {
 
     if (options?.jsonMode) {
       body.response_format = { type: "json_object" };
+    }
+
+    if (this.config.thinkingMode !== undefined) {
+      body.chat_template_kwargs = { enable_thinking: this.config.thinkingMode };
     }
 
     const response = await fetch(`${this.config.baseUrl}/chat/completions`, {

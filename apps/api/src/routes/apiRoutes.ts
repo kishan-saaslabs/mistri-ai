@@ -1,6 +1,8 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { CallController, DealController } from "../controllers/callController.js";
+import { ConversationController } from "../controllers/conversationController.js";
+import { SearchController } from "../controllers/searchController.js";
 import { UserController } from "../controllers/userController.js";
 import { requireAuth } from "../middleware/auth.js";
 import { callUpload } from "../middleware/upload.js";
@@ -36,3 +38,10 @@ apiRouter.patch("/calls/:id", CallController.update);
 apiRouter.get("/calls/:id/transcriptions", CallController.transcriptions);
 apiRouter.post("/calls/:id/transcribe", CallController.retranscribe);
 apiRouter.post("/calls/:id/infer-and-rename", CallController.inferAndRename);
+apiRouter.get("/calls/:id/insights", CallController.insights);
+
+apiRouter.post("/search", SearchController.search);
+
+apiRouter.post("/conversations", ConversationController.create);
+apiRouter.get("/conversations/:id/messages", ConversationController.listMessages);
+apiRouter.post("/conversations/:id/messages", ConversationController.postMessage);

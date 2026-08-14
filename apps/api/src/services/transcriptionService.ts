@@ -12,10 +12,18 @@ import { env } from "../config/env.js";
 import { uploadRoot } from "../middleware/upload.js";
 import { CallModel } from "../models/callModel.js";
 import { CallTranscriptModel } from "../models/callTranscriptModel.js";
-import { TranscriptionModel, type TranscriptionRecord } from "../models/transcriptionModel.js";
+import {
+  TranscriptionModel,
+  type TranscriptionRecord,
+} from "../models/transcriptionModel.js";
 import { publishCallInsightsJob } from "../queue/callInsightsQueue.js";
 import { publishInferAndRenameJob } from "../queue/inferAndRenameQueue.js";
-import { transcribeAudioFile, finishPyaiJob, PyaiPollTimeoutError } from "./pyaiHear.js";
+import { publishKbIngestJob } from "../queue/kbIngestQueue.js";
+import {
+  transcribeAudioFile,
+  finishPyaiJob,
+  PyaiPollTimeoutError,
+} from "./pyaiHear.js";
 
 export type InferAndRenameResult = {
   inferred: InferredSpeaker[];
@@ -25,14 +33,16 @@ export type InferAndRenameResult = {
 };
 
 function toSpeakerMap(inferred: InferredSpeaker[]): SpeakerMap {
-  return Object.fromEntries(inferred.map((item) => [item.label, item.suggestedName]));
+  return Object.fromEntries(
+    inferred.map((item) => [item.label, item.suggestedName])
+  );
 }
 
 async function saveNamedTranscript(
   transcription: TranscriptionRecord,
   named: NamedTranscript,
   inferred: InferredSpeaker[],
-  publishInsights: boolean,
+  publishInsights: boolean
 ) {
   await CallTranscriptModel.upsert({
     callId: transcription.call_id,
@@ -48,7 +58,8 @@ async function saveNamedTranscript(
         transcriptionId: transcription.id,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Queue publish failed";
+      const message =
+        error instanceof Error ? error.message : "Queue publish failed";
       console.error("Could not enqueue call-insights:", message);
     }
   }
@@ -64,7 +75,7 @@ async function persistPyaiSuccess(
     durationSeconds: number | null;
     fullText: string;
     segments: TranscriptionRecord["segments"];
-  },
+  }
 ) {
   const saved = await TranscriptionModel.markReady(transcriptionId, {
     language: result.language,
@@ -76,32 +87,47 @@ async function persistPyaiSuccess(
     throw new Error("Could not save transcription");
   }
 
-  const duration = result.durationSeconds != null ? Math.round(result.durationSeconds) : undefined;
+  const duration =
+    result.durationSeconds != null
+      ? Math.round(result.durationSeconds)
+      : undefined;
   await CallModel.updateStatus(callId, "PYAI_SUCCESS", duration);
 
   try {
     await publishInferAndRenameJob({ callId, transcriptionId: saved.id });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Queue publish failed";
+    const message =
+      error instanceof Error ? error.message : "Queue publish failed";
     console.error("Could not enqueue infer-and-rename:", message);
   }
 
   return saved;
 }
 
-async function failPyai(callId: string, transcriptionId: string, error: unknown) {
-  const message = error instanceof Error ? error.message : "Transcription failed";
+async function failPyai(
+  callId: string,
+  transcriptionId: string,
+  error: unknown
+) {
+  const message =
+    error instanceof Error ? error.message : "Transcription failed";
   await TranscriptionModel.markFailed(transcriptionId, message);
   await CallModel.updateStatus(callId, "PYAI_FAILED");
 }
 
-async function pollExistingPyaiJob(callId: string, transcriptionId: string, jobId: string) {
+async function pollExistingPyaiJob(
+  callId: string,
+  transcriptionId: string,
+  jobId: string
+) {
   try {
     const result = await finishPyaiJob(jobId);
     return await persistPyaiSuccess(callId, transcriptionId, result);
   } catch (error) {
     if (error instanceof PyaiPollTimeoutError) {
-      console.error("PyAI job still running; leaving transcription in PYAI_TRANSCRIBING");
+      console.error(
+        "PyAI job still running; leaving transcription in PYAI_TRANSCRIBING"
+      );
       return null;
     }
     await failPyai(callId, transcriptionId, error);
@@ -141,19 +167,24 @@ export const TranscriptionService = {
           absolutePath: resolve(uploadRoot, call.storage_path),
           filename,
           mimeType: mimeByExt[ext] ?? "application/octet-stream",
-          audioUrl: call.source_url && /^https?:\/\//i.test(call.source_url) ? call.source_url : undefined,
+          audioUrl:
+            call.source_url && /^https?:\/\//i.test(call.source_url)
+              ? call.source_url
+              : undefined,
         },
         {
           onJobSubmitted: async (jobId) => {
             await TranscriptionModel.markTranscribing(row.id, jobId);
           },
-        },
+        }
       );
 
       return persistPyaiSuccess(callId, row.id, result);
     } catch (error) {
       if (error instanceof PyaiPollTimeoutError) {
-        console.error("PyAI job still running; leaving transcription in PYAI_TRANSCRIBING");
+        console.error(
+          "PyAI job still running; leaving transcription in PYAI_TRANSCRIBING"
+        );
         return null;
       }
       await failPyai(callId, row.id, error);
@@ -165,10 +196,13 @@ export const TranscriptionService = {
     const rows = await TranscriptionModel.listInFlightPyai();
     for (const row of rows) {
       if (!row.provider_job_id) continue;
-      void pollExistingPyaiJob(row.call_id, row.id, row.provider_job_id).catch((error) => {
-        const message = error instanceof Error ? error.message : "Transcription failed";
-        console.error("Resumed transcription failed:", message);
-      });
+      void pollExistingPyaiJob(row.call_id, row.id, row.provider_job_id).catch(
+        (error) => {
+          const message =
+            error instanceof Error ? error.message : "Transcription failed";
+          console.error("Resumed transcription failed:", message);
+        }
+      );
     }
   },
 
@@ -176,7 +210,9 @@ export const TranscriptionService = {
     return TranscriptionModel.listByCallId(callId);
   },
 
-  async inferAndRenameSpeakers(transcription: TranscriptionRecord): Promise<InferAndRenameResult> {
+  async inferAndRenameSpeakers(
+    transcription: TranscriptionRecord
+  ): Promise<InferAndRenameResult> {
     // Guard: only pick up transcriptions that are actually in PYAI_SUCCESS.
     // Checked on the transcription itself, not the call — a call can have
     // multiple transcription rows (retries), each with its own status, so
@@ -221,7 +257,9 @@ export const TranscriptionService = {
         };
       }
 
-      const cached = await CallTranscriptModel.findByTranscriptionId(transcription.id);
+      const cached = await CallTranscriptModel.findByTranscriptionId(
+        transcription.id
+      );
       if (cached) {
         await TranscriptionModel.markLLMSuccess(transcription.id);
         return {
@@ -235,10 +273,47 @@ export const TranscriptionService = {
       const inferred = await inferSpeakerNames(segments, client);
       const named = applySpeakerNames(segments, toSpeakerMap(inferred));
       const readable = renderNamedTranscript(named);
+      await CallTranscriptModel.upsert({
+        callId: transcription.call_id,
+        transcriptionId: transcription.id,
+        segments: named,
+        inferredSpeakers: inferred,
+      });
+
+      // A fresh named transcript now exists — publish both downstream
+      // pipeline stages. Not published on the cache-hit / short-circuit
+      // paths above: those don't produce a new call_transcripts row, so
+      // there'd be nothing new for either to read. The two are
+      // independent of each other (neither call-insights extraction nor
+      // KB chunking/embedding blocks the other) — a slow or failing one
+      // must never hold up the other coming online.
+      try {
+        await publishCallInsightsJob({
+          callId: transcription.call_id,
+          transcriptionId: transcription.id,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Queue publish failed";
+        console.error("Could not enqueue call-insights:", message);
+      }
+      try {
+        await publishKbIngestJob({
+          callId: transcription.call_id,
+          transcriptionId: transcription.id,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Queue publish failed";
+        console.error("Could not enqueue kb-ingest:", message);
+      }
+
+      await TranscriptionModel.markLLMSuccess(transcription.id);
       await saveNamedTranscript(transcription, named, inferred, true);
       return { inferred, transcript: named, readable };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Speaker inference failed";
+      const message =
+        error instanceof Error ? error.message : "Speaker inference failed";
       await TranscriptionModel.markLLMFailed(transcription.id, message);
       throw error;
     }

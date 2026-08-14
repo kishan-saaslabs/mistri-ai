@@ -28,8 +28,10 @@
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "redis:up": "docker compose up -d redis",
+    "docker:up": "docker compose up -d --wait postgres redis",
     "db:migrate": "pnpm --filter @mistri-ai/api db:migrate",
-    "db:seed": "pnpm --filter @mistri-ai/api db:seed"
+    "db:seed": "pnpm --filter @mistri-ai/api db:seed",
+    "bootstrap": "node scripts/setup.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"]

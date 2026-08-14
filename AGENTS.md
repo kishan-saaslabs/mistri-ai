@@ -12,7 +12,7 @@
 - Dialogs keep the default backdrop blur; do not add enter animations or blur modal text.
 
 ## Learned Workspace Facts
-- Local Docker is OrbStack; Postgres runs via docker compose (`pnpm db:up` / `pnpm db:down`) as `postgres:16-alpine` on localhost:5432 with db/user `mistri`.
+- Local Docker is OrbStack; Postgres runs via docker compose (`pnpm bootstrap` / `pnpm docker:up`) as `pgvector/pgvector:pg16` on localhost:5432 with db/user `mistri`. Redis defaults to localhost:6379 (`REDIS_PORT` / `REDIS_URL` in `.env`).
 - Postgres applies `POSTGRES_PASSWORD` only on first volume init; after changing `.env`, recreate with `docker compose down -v` then `pnpm db:up`.
 - The API reads repo-root `.env`; `pnpm db:migrate` and `pnpm db:seed` use that `DATABASE_URL`.
 - Call details (`CallDetailView`) loads transcript and Intel from the call API; the title shows speaker count, not speaker tags.

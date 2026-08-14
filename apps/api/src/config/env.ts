@@ -59,6 +59,7 @@ const envSchema = z.object({
   REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
   QUEUE_INFER_AND_RENAME_NAME: z.string().min(1).default("infer-and-rename"),
   QUEUE_CALL_INSIGHTS_NAME: z.string().min(1).default("call-insights"),
+  QUEUE_KB_INGEST_NAME: z.string().min(1).default("kb-ingest"),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -15,6 +15,9 @@ export const openApiSpec = {
     { name: "Deals", description: "Deal records. One deal can have many calls." },
     { name: "Calls", description: "Call recordings and deal mapping" },
     { name: "Transcriptions", description: "PyAI Hear Telephony batch jobs with diarized speaker segments" },
+    { name: "Insights", description: "LLM-generated call insights: summary, objections, customer wants, next steps" },
+    { name: "Search", description: "Direct hybrid (vector + lexical) search over a call's or deal's chunked transcript" },
+    { name: "Chat", description: "Multi-turn chat over one call or deal, with evidence citations back to real transcript lines" },
   ],
   components: {
     securitySchemes: {
@@ -240,6 +243,189 @@ export const openApiSpec = {
             description:
               "Present only when inference was short-circuited, e.g. no diarization data or no segments — inferred is [] in that case",
           },
+        },
+      },
+      Evidence: {
+        type: "object",
+        required: ["segmentId", "quote"],
+        properties: {
+          segmentId: { type: "string", example: "seg_3" },
+          quote: { type: "string", description: "Verbatim quote from that exact segment's text" },
+        },
+      },
+      CallInsightSummaryItem: {
+        type: "object",
+        required: ["title", "text", "evidence"],
+        properties: {
+          title: { type: "string" },
+          text: { type: "string" },
+          evidence: { type: "array", items: { $ref: "#/components/schemas/Evidence" } },
+        },
+      },
+      CallInsightObjection: {
+        type: "object",
+        required: ["title", "text", "evidence"],
+        properties: {
+          title: { type: "string" },
+          text: { type: "string" },
+          evidence: { type: "array", items: { $ref: "#/components/schemas/Evidence" } },
+        },
+      },
+      CallInsightCustomerWant: {
+        type: "object",
+        required: ["label", "confidence", "evidence"],
+        properties: {
+          label: { type: "string" },
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+          evidence: { type: "array", items: { $ref: "#/components/schemas/Evidence" } },
+        },
+      },
+      CallInsightNextStep: {
+        type: "object",
+        required: ["text", "owner", "evidence"],
+        properties: {
+          text: { type: "string" },
+          owner: { type: "string" },
+          evidence: { type: "array", items: { $ref: "#/components/schemas/Evidence" } },
+        },
+      },
+      CallInsightFollowUpEmail: {
+        type: "object",
+        required: ["subject", "body", "confidence", "evidence"],
+        properties: {
+          subject: { type: "string" },
+          body: { type: "string" },
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+          evidence: { type: "array", items: { $ref: "#/components/schemas/Evidence" } },
+        },
+      },
+      CallInsight: {
+        type: "object",
+        properties: {
+          id: { type: "string", format: "uuid" },
+          call_id: { type: "string", format: "uuid" },
+          transcription_id: { type: "string", format: "uuid" },
+          status: {
+            type: "string",
+            enum: ["PROCESSING", "SUCCESS", "FAILED"],
+            description: "PROCESSING while the LLM call is in flight; summary/objections/etc. are [] until SUCCESS",
+          },
+          summary: { type: "array", items: { $ref: "#/components/schemas/CallInsightSummaryItem" } },
+          objections: { type: "array", items: { $ref: "#/components/schemas/CallInsightObjection" } },
+          customer_wants: { type: "array", items: { $ref: "#/components/schemas/CallInsightCustomerWant" } },
+          next_steps: { type: "array", items: { $ref: "#/components/schemas/CallInsightNextStep" } },
+          follow_up_email: {
+            allOf: [{ $ref: "#/components/schemas/CallInsightFollowUpEmail" }],
+            nullable: true,
+          },
+          error: { type: "string", nullable: true, description: "Set when status is FAILED" },
+          created_at: { type: "string", format: "date-time" },
+          updated_at: { type: "string", format: "date-time" },
+        },
+      },
+      SearchRequest: {
+        type: "object",
+        required: ["query", "scopeType"],
+        properties: {
+          query: { type: "string", minLength: 1, maxLength: 2000 },
+          scopeType: { type: "string", enum: ["call", "deal"] },
+          callId: { type: "string", format: "uuid", description: "Required when scopeType is 'call'" },
+          dealId: { type: "string", format: "uuid", description: "Required when scopeType is 'deal'" },
+        },
+      },
+      SearchResult: {
+        type: "object",
+        properties: {
+          rank: { type: "integer" },
+          chunkId: { type: "string", format: "uuid" },
+          callId: { type: "string", format: "uuid" },
+          transcriptionId: { type: "string", format: "uuid" },
+          segmentIds: { type: "array", items: { type: "string" } },
+          text: {
+            type: "string",
+            description:
+              "The exact bounded-expansion text shown for this hit: topic label/summary + the matched turn-window chunk + up to 2 neighbouring turns, each turn prefixed with its real segment id (e.g. [seg_20]).",
+          },
+          attributionUncertain: {
+            type: "boolean",
+            description: "True if any turn in this block came from a speaker resolved with less than high confidence.",
+          },
+        },
+      },
+      SearchResponse: {
+        type: "object",
+        properties: {
+          results: { type: "array", items: { $ref: "#/components/schemas/SearchResult" } },
+          trace: {
+            type: "object",
+            properties: {
+              route: { type: "string", enum: ["SEMANTIC", "WHOLE_CALL", "STRUCTURED_LITE"] },
+              scopeDescription: { type: "string" },
+              effectiveTranscripts: { type: "integer" },
+            },
+          },
+        },
+      },
+      CreateConversationRequest: {
+        type: "object",
+        required: ["scopeType"],
+        properties: {
+          scopeType: { type: "string", enum: ["call", "deal"] },
+          callId: { type: "string", format: "uuid", description: "Required when scopeType is 'call'" },
+          dealId: { type: "string", format: "uuid", description: "Required when scopeType is 'deal'" },
+        },
+      },
+      CreateConversationResponse: {
+        type: "object",
+        properties: {
+          conversationId: { type: "string", format: "uuid" },
+          effectiveTranscriptCount: {
+            type: "integer",
+            description: "Number of transcriptions in scope the caller can actually read. 0 means nothing to answer from yet.",
+          },
+          scopeDescription: { type: "string", example: "this call (\"InboundSampleRecording\")" },
+        },
+      },
+      PostMessageRequest: {
+        type: "object",
+        required: ["content"],
+        properties: {
+          content: { type: "string", minLength: 1, maxLength: 4000 },
+        },
+      },
+      ChatCitation: {
+        type: "object",
+        required: ["segmentId", "chunkId", "quote"],
+        properties: {
+          segmentId: { type: "string", example: "seg_20" },
+          chunkId: { type: "string", description: "A real chunks.id, or a synthetic topic:<id>/insight:<id> reference for whole-call/structured-lite answers." },
+          quote: {
+            type: "string",
+            description:
+              "Verbatim quote, verified to be an exact substring of the exact text shown to the model for this chunkId — never re-checked against a fresh lookup of the original segment's full text.",
+          },
+        },
+      },
+      ChatMessage: {
+        type: "object",
+        properties: {
+          id: { type: "string", format: "uuid" },
+          conversation_id: { type: "string", format: "uuid" },
+          role: { type: "string", enum: ["user", "assistant"] },
+          content: { type: "string" },
+          original_query: { type: "string", nullable: true },
+          rewritten_query: {
+            type: "string",
+            nullable: true,
+            description: "Set only when the message was rewritten as a follow-up (see §8.2-style contextualization). Null on the first turn or a self-contained message.",
+          },
+          citations: { type: "array", items: { $ref: "#/components/schemas/ChatCitation" } },
+          context_stats: {
+            type: "object",
+            nullable: true,
+            description: "Per-turn diagnostics: route taken, history/evidence token-budget outcome, citations dropped by the evidence gate, whether an attribution-uncertainty caveat fired.",
+          },
+          created_at: { type: "string", format: "date-time" },
         },
       },
       LinkCallRequest: {
@@ -864,7 +1050,7 @@ export const openApiSpec = {
         tags: ["Transcriptions"],
         summary: "Queue LLM speaker-name inference for a call's transcription",
         description:
-          "Enqueues a BullMQ job (queue: infer-and-rename) that infers a real name per diarized speaker label from the call's most recent ready transcription, via an OpenAI-compatible LLM (see apps/ai). Processing happens asynchronously in a worker within the apps/api process, not on this request — this endpoint only validates and enqueues, then returns immediately. Results (suggestions with confidence/evidence, not final answers) are upserted into call_transcripts keyed by transcription_id once the job completes; there is currently no GET endpoint to poll that result over HTTP.",
+          "Enqueues a BullMQ job (queue: infer-and-rename) that infers a real name per diarized speaker label from the call's most recent ready transcription, via an OpenAI-compatible LLM (see apps/ai). Processing happens asynchronously in a worker within the apps/api process, not on this request — this endpoint only validates and enqueues, then returns immediately. Results (suggestions with confidence/evidence, not final answers) are upserted into call_transcripts keyed by transcription_id once the job completes; GET /api/calls/{id} and GET /api/calls/{id}/transcriptions reflect the named transcript once available, but there is no dedicated endpoint to poll call_transcripts directly.",
         security: [{ bearerAuth: [] }],
         parameters: [{ $ref: "#/components/parameters/UuidId" }],
         responses: {
@@ -887,6 +1073,124 @@ export const openApiSpec = {
           "403": { description: "Not allowed to access this call" },
           "404": { description: "Call not found" },
           "409": { description: "Transcription is not ready yet" },
+        },
+      },
+    },
+    "/api/calls/{id}/insights": {
+      get: {
+        tags: ["Insights"],
+        summary: "Get LLM-generated insights for a call's latest transcription",
+        description:
+          "Reads the call_insights row for the call's most recent transcription — does not trigger generation. insights is null if speaker-name inference hasn't produced a call_transcripts row yet for this transcription (nothing has ever been queued). Once a row exists, check status: PROCESSING means a call-insights job is currently running (summary/objections/customer_wants/next_steps are still [] until it finishes), SUCCESS means the fields are populated, FAILED means check error and expect the next automatic run (after a fresh speaker-naming pass) to retry.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: "#/components/parameters/UuidId" }],
+        responses: {
+          "200": {
+            description: "Insights row, or null if none has ever been queued for this transcription",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    insights: {
+                      allOf: [{ $ref: "#/components/schemas/CallInsight" }],
+                      nullable: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "Call has no transcription yet" },
+          "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to access this call" },
+          "404": { description: "Call not found" },
+        },
+      },
+    },
+    "/api/search": {
+      post: {
+        tags: ["Search"],
+        summary: "Hybrid (vector + lexical) search over a call's or deal's chunked transcript",
+        description:
+          "Direct retrieval, independent of chat — useful for testing retrieval quality without contextualization, generation, or the evidence gate. Scope is resolved through the same access-control gate as everything else (CallService.requireCall / listByDeal): an empty result with effectiveTranscripts: 0 means nothing readable is in scope yet, not an error.",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/SearchRequest" } } },
+        },
+        responses: {
+          "200": {
+            description: "Search results, ranked by RRF-fused vector + lexical score",
+            content: { "application/json": { schema: { $ref: "#/components/schemas/SearchResponse" } } },
+          },
+          "400": { description: "Validation failed, or missing callId/dealId for the given scopeType" },
+          "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to access this call/deal" },
+          "404": { description: "Call or deal not found" },
+        },
+      },
+    },
+    "/api/conversations": {
+      post: {
+        tags: ["Chat"],
+        summary: "Start a chat conversation scoped to one call or one deal",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/CreateConversationRequest" } } },
+        },
+        responses: {
+          "201": {
+            description: "Conversation created",
+            content: { "application/json": { schema: { $ref: "#/components/schemas/CreateConversationResponse" } } },
+          },
+          "400": { description: "Validation failed, or missing callId/dealId for the given scopeType" },
+          "401": { description: "Authentication required" },
+          "403": { description: "Not allowed to access this call/deal" },
+          "404": { description: "Call or deal not found" },
+        },
+      },
+    },
+    "/api/conversations/{id}/messages": {
+      get: {
+        tags: ["Chat"],
+        summary: "List messages in a conversation",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: "#/components/parameters/UuidId" }],
+        responses: {
+          "200": {
+            description: "Messages in creation order",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { messages: { type: "array", items: { $ref: "#/components/schemas/ChatMessage" } } },
+                },
+              },
+            },
+          },
+          "401": { description: "Authentication required" },
+        },
+      },
+      post: {
+        tags: ["Chat"],
+        summary: "Post a chat turn — streamed as Server-Sent Events",
+        description:
+          "Content-Type: text/event-stream. Events, in order: `stage` (authorizing/retrieving/generating), `answer` (the full text — this repo's LLMClient isn't token-streamed from the provider yet, so this arrives as one write, not many token events), zero or more `citation`, an optional `notice` (kind: attribution_uncertain, when a cited chunk drew on a speaker resolved with less than high confidence), then `done` with the persisted messageId. On failure, a single `error` event with a status and message.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: "#/components/parameters/UuidId" }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/PostMessageRequest" } } },
+        },
+        responses: {
+          "200": {
+            description: "SSE stream (see description) — not a plain JSON response",
+            content: { "text/event-stream": { schema: { type: "string" } } },
+          },
+          "401": { description: "Authentication required" },
+          "404": { description: "Conversation not found" },
         },
       },
     },
