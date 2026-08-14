@@ -6,7 +6,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 
 const searchSchema = z.object({
   query: z.string().trim().min(1).max(2000),
-  scopeType: z.enum(["call", "deal"]),
+  scopeType: z.enum(["call", "deal", "global"]),
   callId: z.string().uuid().optional(),
   dealId: z.string().uuid().optional(),
 });

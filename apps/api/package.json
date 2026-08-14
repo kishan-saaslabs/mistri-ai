@@ -13,6 +13,7 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
+    "reindex": "tsx src/db/reindex.ts",
     "evals": "tsx src/evals/runEvals.ts"
   },
   "engines": {
