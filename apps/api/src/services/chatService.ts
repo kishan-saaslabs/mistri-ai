@@ -1,9 +1,11 @@
 import {
   contextualizeQuery,
   generateChatAnswer,
+  generateDealSynthesisAnswer,
   getChatLLMClient,
   tokenCount,
   validateCitations,
+  validateDealCitations,
   type ChatCitation,
   type ChatTurn,
 } from "@mistri-ai/ai";
@@ -35,6 +37,17 @@ type EvidenceBlockWithMeta = {
   text: string;
   attributionUncertain: boolean;
 };
+
+const TITLE_MAX_CHARS = 60;
+
+// Truncation of the first message, not an extra LLM call — a title is a
+// list/search label, not something that needs to read well on its own, and
+// this makes it free and instant instead of adding latency (and cost) to
+// every new conversation's first turn.
+function deriveTitle(firstMessage: string): string {
+  const trimmed = firstMessage.trim().replace(/\s+/g, " ");
+  return trimmed.length > TITLE_MAX_CHARS ? `${trimmed.slice(0, TITLE_MAX_CHARS).trimEnd()}…` : trimmed;
+}
 
 function truncateToTokenBudget(text: string, budget: number): string {
   if (tokenCount(text) <= budget) return text;
@@ -296,6 +309,18 @@ export const ChatService = {
     // reliably drags a fresh, well-evidenced answer into refusing too.
     const normalizedContent = content.trim().toLowerCase();
     const priorMessages = await MessageModel.listByConversationId(conversationId);
+
+    // First message of the conversation and no title yet (every
+    // conversation was permanently titleless before this — see
+    // ConversationModel.setTitleIfEmpty) — derive one now, not blocking on
+    // the rest of the turn since it's cosmetic (list/search label), not
+    // something the answer depends on.
+    if (priorMessages.length === 0 && !conversation.title) {
+      void ConversationModel.setTitleIfEmpty(conversationId, deriveTitle(content)).catch((error) => {
+        console.error("Could not set conversation title:", error instanceof Error ? error.message : error);
+      });
+    }
+
     const groundedMessages = priorMessages.filter(
       (m) =>
         (m.role === "user" && m.content.trim().toLowerCase() !== normalizedContent) ||
@@ -323,23 +348,6 @@ export const ChatService = {
       }
     }
 
-    if (scope.transcriptionIds.length === 0) {
-      const answer = `I don't have any processed calls in ${scope.scopeDescription} to answer from yet.`;
-      await MessageModel.insertUserMessage({
-        conversationId,
-        content,
-        originalQuery: content,
-        rewrittenQuery: isFollowup ? standaloneQuery : null,
-      });
-      const saved = await MessageModel.insertAssistantMessage({
-        conversationId,
-        content: answer,
-        citations: [],
-        contextStats: { route: "SEMANTIC", reason: "empty_scope" },
-      });
-      return saved;
-    }
-
     const { route, field } = RetrievalService.route(standaloneQuery, conversation.scope_type);
 
     await MessageModel.insertUserMessage({
@@ -348,6 +356,86 @@ export const ChatService = {
       originalQuery: content,
       rewrittenQuery: isFollowup ? standaloneQuery : null,
     });
+
+    // STRUCTURED_AGGREGATE: "how many deals/calls", "what deals do I have" —
+    // resolved from a direct DB count/listing, never chunk retrieval, and
+    // checked BEFORE the empty-scope guard below since it doesn't need any
+    // transcriptions to exist at all (a brand-new account with deals but no
+    // processed calls yet can still answer "how many deals").
+    if (route === "STRUCTURED_AGGREGATE") {
+      const { answer } = await RetrievalService.answerAggregateQuestion(
+        actorId,
+        standaloneQuery,
+        conversation.scope_type === "deal" ? conversation.scope_deal_id : undefined,
+      );
+      await ConversationModel.updateAfterTurn(conversationId, []);
+      return MessageModel.insertAssistantMessage({
+        conversationId,
+        content: answer,
+        citations: [],
+        contextStats: { route },
+      });
+    }
+
+    // DEAL_SYNTHESIS: "which deal needs attention", "score for X", "will any
+    // deals churn" — a judgment synthesized across a deal's (or every
+    // deal's) recorded objections/next-steps, never chunk retrieval. Also
+    // checked before the empty-scope guard: it reasons over call_insights
+    // rows directly, not transcriptions/chunks.
+    if (route === "DEAL_SYNTHESIS") {
+      const dealBlocks = await RetrievalService.resolveDealsForSynthesis(
+        actorId,
+        standaloneQuery,
+        conversation.scope_type === "deal" ? conversation.scope_deal_id : undefined,
+      );
+      if (dealBlocks.length === 0) {
+        await ConversationModel.updateAfterTurn(conversationId, []);
+        return MessageModel.insertAssistantMessage({
+          conversationId,
+          content: "You don't have any deals with recorded calls to assess yet.",
+          citations: [],
+          contextStats: { route },
+        });
+      }
+
+      const synthesis = await generateDealSynthesisAnswer(
+        { question: standaloneQuery, deals: dealBlocks.map((d) => ({ dealId: d.dealId, dealName: d.dealName, text: d.text })) },
+        chatClient,
+      );
+      const dealTextByName = new Map(dealBlocks.map((d) => [d.dealName, d.text]));
+      const dealIdByName = new Map(dealBlocks.map((d) => [d.dealName, d.dealId]));
+      const { validCitations: validDealCitations, droppedCount: droppedDealCitations } = validateDealCitations(
+        synthesis.citations,
+        dealTextByName,
+      );
+      // Stored in the same ChatCitation shape as chunk-based citations (no
+      // schema change) via a synthetic `deal:<id>` chunkId and a fixed
+      // sentinel segmentId — there's no per-segment granularity here, the
+      // evidence unit is a whole deal's rollup, not a transcript turn.
+      const storedCitations: ChatCitation[] = validDealCitations.map((c) => ({
+        chunkId: `deal:${dealIdByName.get(c.dealName) ?? "unknown"}`,
+        segmentId: "deal-summary",
+        quote: c.quote,
+      }));
+
+      await ConversationModel.updateAfterTurn(conversationId, []);
+      return MessageModel.insertAssistantMessage({
+        conversationId,
+        content: synthesis.answer,
+        citations: storedCitations,
+        contextStats: { route, dealsAssessed: dealBlocks.length, citationsDropped: droppedDealCitations },
+      });
+    }
+
+    if (scope.transcriptionIds.length === 0) {
+      const answer = `I don't have any processed calls in ${scope.scopeDescription} to answer from yet.`;
+      return MessageModel.insertAssistantMessage({
+        conversationId,
+        content: answer,
+        citations: [],
+        contextStats: { route: "SEMANTIC", reason: "empty_scope" },
+      });
+    }
 
     // STRUCTURED_LITE: deterministic, no LLM call at all — the call-scope
     // analogue of the source spec's L6 (aggregate/named-field questions
@@ -396,6 +484,14 @@ export const ChatService = {
       if (transcriptionIdForRecord) {
         const insights = await CallInsightModel.findByTranscriptionId(transcriptionIdForRecord);
         if (insights?.status === "SUCCESS") structuredRecordText = formatInsightsAsStructuredRecord(insights);
+      } else {
+        // global/deal scope: always give the model the real deal/call
+        // directory, not just when the question happens to match
+        // AGGREGATE_QUESTION_PATTERN — the regex router can only catch
+        // phrasings someone thought to write a pattern for, so this is the
+        // fallback that lets a wider range of structural questions still
+        // get a grounded answer via the normal SEMANTIC generation path.
+        structuredRecordText = await RetrievalService.buildAccountDirectory(actorId);
       }
 
       const hits = await RetrievalService.hybridSearch(scope.transcriptionIds, standaloneQuery);
@@ -431,10 +527,21 @@ export const ChatService = {
     // and reliably makes it refuse to answer at all rather than trust
     // either version. Current-turn evidence is strictly more complete, so
     // it always wins the dedupe.
+    // Also gated on isFollowup: contextualizeQuery already determined
+    // whether this question depends on prior turns at all. Confirmed live:
+    // a genuinely new, unrelated question ("About Land CCK" right after
+    // "what calls do I have access to?") still had the OLD unrelated
+    // turn's evidence carried into its evidence pool — noise at best, and
+    // — like the duplicate-chunkId case above — another way for the
+    // evidence section to look inconsistent and push the model toward
+    // refusing. If contextualizeQuery says this turn isn't a follow-up,
+    // nothing needs to be carried forward at all.
     const currentEvidenceChunkIds = new Set(currentEvidenceBlocks.map((b) => b.chunkId));
-    const carriedPointers = (conversation.carried_evidence ?? []).filter(
-      (c) => authorizedTranscriptionIds.has(c.transcriptionId) && !currentEvidenceChunkIds.has(c.chunkId),
-    );
+    const carriedPointers = isFollowup
+      ? (conversation.carried_evidence ?? []).filter(
+          (c) => authorizedTranscriptionIds.has(c.transcriptionId) && !currentEvidenceChunkIds.has(c.chunkId),
+        )
+      : [];
     const carriedChunks = await ChunkModel.findByIds(carriedPointers.map((c) => c.chunkId));
     const carriedEvidenceBlocks: EvidenceBlockWithMeta[] = carriedChunks.map((c) => ({
       chunkId: c.id,
@@ -447,7 +554,16 @@ export const ChatService = {
     const fittedCurrentEvidence = fitBlocksToBudget(currentEvidenceBlocks, BUDGET.currentEvidenceTokens);
     const fittedCarriedEvidence = fitBlocksToBudget(carriedEvidenceBlocks, BUDGET.carriedEvidenceTokens);
     const fittedStructuredRecord = truncateToTokenBudget(structuredRecordText, BUDGET.structuredRecordTokens);
-    const { text: historyText, keptCount, droppedCount } = renderHistory(history, BUDGET.historyTokens);
+    // Same isFollowup gate as carried evidence above, and for the same
+    // reason: confirmed live that showing the model PURELY irrelevant
+    // history prose (an unrelated prior Q&A, not even any shared evidence)
+    // measurably raised the refusal rate on a fresh, unrelated, otherwise
+    // reliably-answered question (2/6 vs. 0/6 in repeated identical runs).
+    // contextualizeQuery already determined this turn doesn't depend on
+    // history at all — showing it anyway can only add noise, never help.
+    const { text: historyText, keptCount, droppedCount } = isFollowup
+      ? renderHistory(history, BUDGET.historyTokens)
+      : { text: "", keptCount: 0, droppedCount: history.length };
 
     const allEvidenceBlocks = [...fittedCurrentEvidence, ...fittedCarriedEvidence];
 

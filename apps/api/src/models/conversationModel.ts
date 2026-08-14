@@ -74,6 +74,19 @@ export const ConversationModel = {
     );
   },
 
+  // Only fills in a title that's currently null — never overwrites one a
+  // user set explicitly (once a rename endpoint exists) or one already
+  // derived from an earlier turn. Every conversation was permanently
+  // titleless before this existed, which also silently broke
+  // searchForUser's title search above (title ILIKE ... can never match a
+  // null column) — this is the fix for both.
+  setTitleIfEmpty(id: string, title: string) {
+    return queryOne<ConversationRecord>(
+      `UPDATE conversations SET title = $2 WHERE id = $1 AND title IS NULL RETURNING *`,
+      [id, title],
+    );
+  },
+
   searchForUser(input: {
     userId: string;
     organizationId: string;

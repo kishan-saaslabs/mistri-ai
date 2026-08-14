@@ -359,7 +359,10 @@ export const openApiSpec = {
           trace: {
             type: "object",
             properties: {
-              route: { type: "string", enum: ["SEMANTIC", "WHOLE_CALL", "STRUCTURED_LITE"] },
+              route: {
+                type: "string",
+                enum: ["SEMANTIC", "WHOLE_CALL", "STRUCTURED_LITE", "STRUCTURED_AGGREGATE", "DEAL_SYNTHESIS"],
+              },
               scopeDescription: { type: "string" },
               effectiveTranscripts: { type: "integer" },
             },

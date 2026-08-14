@@ -26,10 +26,6 @@ function hasDependenceSignal(message: string): boolean {
   return GENERIC_DEPENDENCE_WORDS.test(message) || DEICTIC_NOT_SCOPE_SELF_REFERENCE.test(message);
 }
 
-function wordCount(text: string): number {
-  return text.trim().split(/\s+/).filter(Boolean).length;
-}
-
 // A capitalized word not already present (case-insensitively) in the
 // history or the original message — used to reject a rewrite that
 // invents an entity nobody mentioned. Deliberately crude (real NER would
@@ -48,8 +44,8 @@ function introducesNewEntity(rewritten: string, allowedText: string): boolean {
  * Rewrites an elliptical follow-up into a standalone query before any
  * retrieval happens (§8.2 of the source spec) — "how serious is the
  * second one?" embeds to nothing useful on its own. Skips the LLM call
- * entirely when the message has no dependence signal and is long enough
- * to plausibly stand on its own, since most turns don't need rewriting.
+ * entirely when the message has no dependence signal (pronoun/ordinal/
+ * deictic), since most turns don't need rewriting regardless of length.
  */
 export async function contextualizeQuery(
   history: ChatTurn[],
@@ -60,15 +56,20 @@ export async function contextualizeQuery(
     return { standaloneQuery: message, isFollowup: false };
   }
 
-  // Length threshold lowered from the source spec's own >6 words: tested
-  // live, "Can you summarize this call?" (5 words, no dependence signal)
-  // still triggered a rewrite call at the >6 bar, and the rewrite model
-  // hijacked it into re-answering the PRIOR turn's topic instead of
-  // treating it as the self-contained question it is. A message with no
-  // pronoun/ordinal/deictic at all doesn't need 7+ words to stand alone;
-  // >3 catches genuine fragments ("why not?", "and then?") while letting
-  // ordinary short questions through untouched.
-  if (!hasDependenceSignal(message) && wordCount(message) > 3) {
+  // No length threshold here anymore — a word-count gate was tried twice
+  // (originally >6, then lowered to >3) and broke again both times on
+  // short, fully self-contained messages that just happen to be brief:
+  // "Can you summarize this call?" (5 words) and "About Land CCK" (3
+  // words) both got force-routed into an LLM rewrite purely for being
+  // "too short," and the rewrite then hijacked them using unrelated prior
+  // history — confirmed live, "About Land CCK" (no dependence signal) came
+  // back empty because the rewrite merged in the previous turn's unrelated
+  // topic, while "Tell me About Land CCK" (no dependence signal either,
+  // just 2 words longer) skipped the rewrite and worked. Length was never
+  // the real signal; whether the message actually contains a pronoun/
+  // ordinal/deictic dependence marker is. A message with none of those
+  // doesn't need history to mean something, regardless of how short it is.
+  if (!hasDependenceSignal(message)) {
     return { standaloneQuery: message, isFollowup: false };
   }
 
