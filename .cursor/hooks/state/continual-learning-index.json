@@ -1,17 +1,47 @@
 {
   "version": 1,
   "transcripts": {
+    "33e54519-9ba7-42be-af65-04672fce652a/33e54519-9ba7-42be-af65-04672fce652a.jsonl": {
+      "mtimeMs": 1786648740317.4023
+    },
+    "77c6a006-77ba-4d8c-a4f1-9cb0654cfc2b/77c6a006-77ba-4d8c-a4f1-9cb0654cfc2b.jsonl": {
+      "mtimeMs": 1786649040514.849
+    },
+    "a2b21880-c691-44b8-9e99-6bfc2c384b4f/a2b21880-c691-44b8-9e99-6bfc2c384b4f.jsonl": {
+      "mtimeMs": 1786644442494.141
+    },
+    "a2b21880-c691-44b8-9e99-6bfc2c384b4f/subagents/472ce9e9-6200-478e-9c60-3e69265b7d4e.jsonl": {
+      "mtimeMs": 1786643675649.3813
+    },
     "ab15213f-1e5a-4ec1-ab2b-ef9a87e4e318/ab15213f-1e5a-4ec1-ab2b-ef9a87e4e318.jsonl": {
       "mtimeMs": 1786628701324.1855
     },
     "ab15213f-1e5a-4ec1-ab2b-ef9a87e4e318/subagents/3195d315-e014-44bf-b1d0-9fea76c32d17.jsonl": {
       "mtimeMs": 1786628693547.6982
     },
+    "b4a5880f-2218-4463-b231-b2c5bc13de1e/b4a5880f-2218-4463-b231-b2c5bc13de1e.jsonl": {
+      "mtimeMs": 1786688229165.9817
+    },
+    "b4a5880f-2218-4463-b231-b2c5bc13de1e/subagents/fa4147e3-c009-4ef2-98f8-ae6649e450c2.jsonl": {
+      "mtimeMs": 1786688282408.626
+    },
+    "b6b0e3d4-b179-4bab-bf7a-7cefa1b69cd2/b6b0e3d4-b179-4bab-bf7a-7cefa1b69cd2.jsonl": {
+      "mtimeMs": 1786650501940.4182
+    },
     "d8cbc194-e396-4577-b6ae-12ab38c661ec/d8cbc194-e396-4577-b6ae-12ab38c661ec.jsonl": {
-      "mtimeMs": 1786636350331.8716
+      "mtimeMs": 1786638056240.9353
     },
     "d8cbc194-e396-4577-b6ae-12ab38c661ec/subagents/7a751b04-ea27-48a3-b1dc-908580639250.jsonl": {
-      "mtimeMs": 1786636367511.017
+      "mtimeMs": 1786636486011.7559
+    },
+    "f64fbec7-f1d9-4e8f-a0e5-a587437072a6/f64fbec7-f1d9-4e8f-a0e5-a587437072a6.jsonl": {
+      "mtimeMs": 1786647230873.7036
+    },
+    "f64fbec7-f1d9-4e8f-a0e5-a587437072a6/subagents/391e75ba-0b5e-4d62-a8fe-ec358bcaff8b.jsonl": {
+      "mtimeMs": 1786644873746.803
+    },
+    "f64fbec7-f1d9-4e8f-a0e5-a587437072a6/subagents/c5fd730e-5c81-4a3a-a9a2-52c99b0afc9d.jsonl": {
+      "mtimeMs": 1786644950639.4211
     },
     "f66ced84-baf1-441e-acc8-7f0d3cfc470b/f66ced84-baf1-441e-acc8-7f0d3cfc470b.jsonl": {
       "mtimeMs": 1786606268926.5234

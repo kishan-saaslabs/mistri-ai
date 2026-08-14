@@ -4,7 +4,7 @@ Express API (MVC) for Mistri AI.
 
 - Postgres via `DATABASE_URL`
 - JWT auth (`JWT_SECRET` from the environment)
-- Multer uploads under `UPLOAD_DIR` (gitignored)
+- Recordings in S3-compatible object storage (`S3_*` from the environment)
 
 From the repo root:
 

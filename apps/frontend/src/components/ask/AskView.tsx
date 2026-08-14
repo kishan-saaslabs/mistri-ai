@@ -1,8 +1,14 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "motion/react";
+import { ArrowUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { HealthGauge } from "@/components/calls/HealthGauge";
 import { ASK_SUGGESTIONS } from "@/lib/ask";
 import { motionTransition, springs } from "@/lib/motion";
@@ -23,9 +29,32 @@ export function AskView() {
     openEvidence,
   } = useWorkspace();
   const navigate = useNavigate();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const location = useLocation();
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [draft, setDraft] = useState("");
   const reduce = useReducedMotion();
+
+  useEffect(() => {
+    const prompt = (
+      location.state as { prompt?: string } | null
+    )?.prompt?.trim();
+    if (!prompt) return;
+    setDraft(prompt);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  }, [location.state]);
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [draft]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -34,19 +63,37 @@ export function AskView() {
 
   function submit(event?: FormEvent) {
     event?.preventDefault();
-    const value = inputRef.current?.value ?? "";
+    const value = draft.trim();
+    if (!value || askBusy) return;
     askQuestion(value);
-    if (inputRef.current) inputRef.current.value = "";
+    setDraft("");
+    if ((location.state as { prompt?: string } | null)?.prompt) {
+      void navigate("/ask", { replace: true, state: null });
+    }
+  }
+
+  function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submit();
+    }
   }
 
   return (
     <div className="flex h-full flex-col items-center">
-      <div ref={scrollRef} className="flex w-full flex-1 justify-center overflow-y-auto">
+      <div
+        ref={scrollRef}
+        className="flex w-full flex-1 justify-center overflow-y-auto"
+      >
         <div className="w-full max-w-[720px] px-6 pt-6 pb-2">
           {askContext && calls[askContext] ? (
             <div className="mb-4 inline-flex items-center gap-2 rounded-md border border-[#c9d0f0] bg-brand-tint px-2.5 py-1 font-mono text-[11px] text-brand">
               Context: {calls[askContext].label}
-              <button type="button" onClick={() => setAskContext(null)} aria-label="Clear context">
+              <button
+                type="button"
+                onClick={() => setAskContext(null)}
+                aria-label="Clear context"
+              >
                 ×
               </button>
             </div>
@@ -54,13 +101,13 @@ export function AskView() {
 
           {askHistory.length === 0 && !askBusy ? (
             <div className="pt-[60px] text-center">
-              <div className="mx-auto mb-4 flex size-11 items-center justify-center rounded-[10px] bg-foreground text-[15px] font-bold text-white">
+              <div className="mx-auto mb-4 flex size-11 items-center justify-center rounded-[10px] border border-border bg-muted text-[15px] font-bold text-foreground">
                 M
               </div>
               <h2 className="mb-1.5 text-[17px] font-semibold">Ask Mistri</h2>
               <p className="mb-[22px] text-[13px] text-muted-foreground">
-                Ask about a deal or a rep — the answer renders right here, with the deal health, evidence, and next step,
-                not just a summary.
+                Ask about a deal or a rep — the answer renders right here, with
+                the deal health, evidence, and next step, not just a summary.
               </p>
               <div className="flex flex-wrap justify-center gap-2">
                 {ASK_SUGGESTIONS.map((item) => (
@@ -90,7 +137,9 @@ export function AskView() {
                 }}
               >
                 {entry.role === "user" ? (
-                  <div className="mb-2.5 text-[15px] font-semibold">{entry.text}</div>
+                  <div className="mb-2.5 text-[15px] font-semibold">
+                    {entry.text}
+                  </div>
                 ) : (
                   <BotMessage
                     text={entry.text}
@@ -112,17 +161,35 @@ export function AskView() {
           {askBusy ? <Reasoning /> : null}
         </div>
       </div>
-      <form onSubmit={submit} className="w-full max-w-[720px] px-6 pt-3 pb-[22px]">
-        <div className="flex gap-2 rounded-[9px] border border-border bg-background py-1.5 pr-1.5 pl-3.5">
-          <Input
+      <form
+        onSubmit={submit}
+        className="w-full max-w-[720px] px-6 pt-3 pb-[22px]"
+      >
+        <div className="rounded-xl border border-border bg-background shadow-sm focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
+          <textarea
             ref={inputRef}
             id="ask-composer"
-            className="h-8 border-0 bg-transparent shadow-none focus-visible:ring-0"
-            placeholder="Ask a question…"
+            rows={1}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={onComposerKeyDown}
+            placeholder="Ask anything…"
+            className="max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 pt-3 pb-1.5 text-[14px] outline-none placeholder:text-muted-foreground"
           />
-          <Button type="submit" className="bg-brand text-white hover:bg-brand-hover">
-            Ask
-          </Button>
+          <div className="flex items-center justify-between gap-2 px-2 pb-2">
+            <span className="pl-1.5 text-[11px] text-muted-foreground">
+              Enter to send · Shift+Enter for a new line
+            </span>
+            <Button
+              type="submit"
+              size="icon-sm"
+              disabled={!draft.trim() || askBusy}
+              className="bg-brand text-white hover:bg-brand-hover"
+              aria-label="Ask"
+            >
+              <ArrowUp />
+            </Button>
+          </div>
         </div>
       </form>
     </div>
@@ -162,14 +229,30 @@ function BotMessage({
         )}
       </div>
       {inlineCard?.type === "deal" && calls[inlineCard.key] ? (
-        <DealCard call={calls[inlineCard.key]!} rep={reps[calls[inlineCard.key]!.rep]} onOpen={onOpenCall} onEvidence={onEvidence} />
+        <DealCard
+          call={calls[inlineCard.key]!}
+          rep={reps[calls[inlineCard.key]!.rep]}
+          onOpen={onOpenCall}
+          onEvidence={onEvidence}
+        />
       ) : null}
-      {inlineCard?.type === "rep" && reps[inlineCard.key] ? <RepCard rep={reps[inlineCard.key]!} /> : null}
+      {inlineCard?.type === "rep" && reps[inlineCard.key] ? (
+        <RepCard rep={reps[inlineCard.key]!} />
+      ) : null}
       {secondaryCard?.type === "deal" && calls[secondaryCard.key] ? (
-        <DealCard call={calls[secondaryCard.key]!} rep={reps[calls[secondaryCard.key]!.rep]} onOpen={onOpenCall} onEvidence={onEvidence} />
+        <DealCard
+          call={calls[secondaryCard.key]!}
+          rep={reps[calls[secondaryCard.key]!.rep]}
+          onOpen={onOpenCall}
+          onEvidence={onEvidence}
+        />
       ) : null}
-      {secondaryCard?.type === "rep" && reps[secondaryCard.key] ? <RepCard rep={reps[secondaryCard.key]!} /> : null}
-      {multiRepCards?.map((key) => (reps[key] ? <RepCard key={key} rep={reps[key]!} /> : null))}
+      {secondaryCard?.type === "rep" && reps[secondaryCard.key] ? (
+        <RepCard rep={reps[secondaryCard.key]!} />
+      ) : null}
+      {multiRepCards?.map((key) =>
+        reps[key] ? <RepCard key={key} rep={reps[key]!} /> : null,
+      )}
     </div>
   );
 }
@@ -190,9 +273,16 @@ function DealCard({
   return (
     <div className="mt-3.5 rounded-lg border border-border bg-background px-[15px] py-3.5">
       <div className="flex items-center gap-3">
-        <HealthGauge score={call.score} color={call.statusColor} size={46} stroke={4} />
+        <HealthGauge
+          score={call.score}
+          color={call.statusColor}
+          size={46}
+          stroke={4}
+        />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13.5px] font-semibold">{call.label}</div>
+          <div className="truncate text-[13.5px] font-semibold">
+            {call.label}
+          </div>
           <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
             {rep?.name} ·
             <span
@@ -207,15 +297,26 @@ function DealCard({
             {call.verdict}
           </div>
         </div>
-        <button type="button" className="shrink-0 font-mono text-[10.5px] text-brand hover:underline" onClick={() => onOpen(call.id)}>
+        <button
+          type="button"
+          className="shrink-0 font-mono text-[10.5px] text-brand hover:underline"
+          onClick={() => onOpen(call.id)}
+        >
           Open call →
         </button>
       </div>
       {topInsight ? (
         <div className="mt-0.5 flex gap-2.5 border-t border-border pt-2.5">
-          <div className={cn("w-0.5 shrink-0 self-stretch rounded-sm", insightKind === "danger" ? "bg-danger" : "bg-success")} />
+          <div
+            className={cn(
+              "w-0.5 shrink-0 self-stretch rounded-sm",
+              insightKind === "danger" ? "bg-danger" : "bg-success",
+            )}
+          />
           <div>
-            <div className="mb-0.5 text-[12.5px] font-semibold">{topInsight.title}</div>
+            <div className="mb-0.5 text-[12.5px] font-semibold">
+              {topInsight.title}
+            </div>
             <p className="mb-1.5 text-xs text-ink-soft">{topInsight.desc}</p>
             <button
               type="button"
@@ -227,7 +328,9 @@ function DealCard({
           </div>
         </div>
       ) : (
-        <p className="mt-0.5 border-t border-border pt-2.5 text-xs text-muted-foreground italic">Nothing flagged on this call.</p>
+        <p className="mt-0.5 border-t border-border pt-2.5 text-xs text-muted-foreground italic">
+          Nothing flagged on this call.
+        </p>
       )}
     </div>
   );
@@ -248,25 +351,36 @@ function RepCard({ rep }: { rep: Rep }) {
       <div className="flex gap-4 text-center">
         <div>
           <b className="block font-mono text-[15px]">{rep.avgHealth ?? "--"}</b>
-          <span className="text-[9.5px] tracking-wide text-muted-foreground uppercase">avg health</span>
+          <span className="text-[9.5px] tracking-wide text-muted-foreground uppercase">
+            avg health
+          </span>
         </div>
         <div>
           <b className="block font-mono text-[15px]">{rep.atRisk}</b>
-          <span className="text-[9.5px] tracking-wide text-muted-foreground uppercase">at risk</span>
+          <span className="text-[9.5px] tracking-wide text-muted-foreground uppercase">
+            at risk
+          </span>
         </div>
       </div>
     </div>
   );
 }
 
-const REASONING_STEPS = ["Reading transcript", "Checking evidence", "Preparing answer"];
+const REASONING_STEPS = [
+  "Reading transcript",
+  "Checking evidence",
+  "Preparing answer",
+];
 
 function Reasoning() {
   const [active, setActive] = useState(0);
   const reduce = useReducedMotion();
 
   useEffect(() => {
-    const id = window.setInterval(() => setActive((n) => Math.min(REASONING_STEPS.length, n + 1)), 260);
+    const id = window.setInterval(
+      () => setActive((n) => Math.min(REASONING_STEPS.length, n + 1)),
+      260,
+    );
     return () => window.clearInterval(id);
   }, []);
 
@@ -285,14 +399,19 @@ function Reasoning() {
             animate={{ opacity: done ? 1 : 0.4 }}
             transition={motionTransition(reduce, springs.gentle)}
           >
-            {index === Math.min(active, REASONING_STEPS.length - 1) && active < REASONING_STEPS.length ? (
+            {index === Math.min(active, REASONING_STEPS.length - 1) &&
+            active < REASONING_STEPS.length ? (
               <motion.span
                 layoutId="ask-reasoning-dot"
                 className="absolute -left-1 size-1.5 rounded-full bg-brand"
                 transition={motionTransition(reduce, springs.pill)}
               />
             ) : null}
-            <span className="w-3 text-center">{index < active - 1 || active >= REASONING_STEPS.length ? "✓" : "○"}</span>
+            <span className="w-3 text-center">
+              {index < active - 1 || active >= REASONING_STEPS.length
+                ? "✓"
+                : "○"}
+            </span>
             {step}…
           </motion.div>
         );

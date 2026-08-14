@@ -1,3 +1,4 @@
+import { existsSync, openAsBlob } from "node:fs";
 import { extname, resolve } from "node:path";
 import {
   applySpeakerNames,
@@ -9,14 +10,31 @@ import {
   type SpeakerMap,
 } from "@mistri-ai/ai";
 import { env } from "../config/env.js";
+import { mimeForAudio } from "../lib/audioFile.js";
+import { providerAudioUrl } from "../lib/providerAudioUrl.js";
 import { uploadRoot } from "../middleware/upload.js";
 import { CallModel } from "../models/callModel.js";
 import { CallTranscriptModel } from "../models/callTranscriptModel.js";
-import { TranscriptionModel, type TranscriptionRecord } from "../models/transcriptionModel.js";
+import {
+  TranscriptionModel,
+  type TranscriptionRecord,
+} from "../models/transcriptionModel.js";
 import { publishCallInsightsJob } from "../queue/callInsightsQueue.js";
 import { publishInferAndRenameJob } from "../queue/inferAndRenameQueue.js";
 import { publishKbIngestJob } from "../queue/kbIngestQueue.js";
 import { transcribeAudioFile, finishPyaiJob, PyaiPollTimeoutError } from "./pyaiHear.js";
+import {
+  transcribeAudioFile,
+  finishPyaiJob,
+  PyaiPollTimeoutError,
+} from "./pyaiHear.js";
+import {
+  headObject,
+  isObjectKey,
+  materializeObjectBlob,
+  presignGetForProvider,
+  pyaiCanFetchUrl,
+} from "./objectStorage.js";
 
 export type InferAndRenameResult = {
   inferred: InferredSpeaker[];
@@ -26,14 +44,16 @@ export type InferAndRenameResult = {
 };
 
 function toSpeakerMap(inferred: InferredSpeaker[]): SpeakerMap {
-  return Object.fromEntries(inferred.map((item) => [item.label, item.suggestedName]));
+  return Object.fromEntries(
+    inferred.map((item) => [item.label, item.suggestedName])
+  );
 }
 
 async function saveNamedTranscript(
   transcription: TranscriptionRecord,
   named: NamedTranscript,
   inferred: InferredSpeaker[],
-  publishInsights: boolean,
+  publishInsights: boolean
 ) {
   await CallTranscriptModel.upsert({
     callId: transcription.call_id,
@@ -49,7 +69,8 @@ async function saveNamedTranscript(
         transcriptionId: transcription.id,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Queue publish failed";
+      const message =
+        error instanceof Error ? error.message : "Queue publish failed";
       console.error("Could not enqueue call-insights:", message);
     }
   }
@@ -65,7 +86,7 @@ async function persistPyaiSuccess(
     durationSeconds: number | null;
     fullText: string;
     segments: TranscriptionRecord["segments"];
-  },
+  }
 ) {
   const saved = await TranscriptionModel.markReady(transcriptionId, {
     language: result.language,
@@ -77,32 +98,47 @@ async function persistPyaiSuccess(
     throw new Error("Could not save transcription");
   }
 
-  const duration = result.durationSeconds != null ? Math.round(result.durationSeconds) : undefined;
+  const duration =
+    result.durationSeconds != null
+      ? Math.round(result.durationSeconds)
+      : undefined;
   await CallModel.updateStatus(callId, "PYAI_SUCCESS", duration);
 
   try {
     await publishInferAndRenameJob({ callId, transcriptionId: saved.id });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Queue publish failed";
+    const message =
+      error instanceof Error ? error.message : "Queue publish failed";
     console.error("Could not enqueue infer-and-rename:", message);
   }
 
   return saved;
 }
 
-async function failPyai(callId: string, transcriptionId: string, error: unknown) {
-  const message = error instanceof Error ? error.message : "Transcription failed";
+async function failPyai(
+  callId: string,
+  transcriptionId: string,
+  error: unknown
+) {
+  const message =
+    error instanceof Error ? error.message : "Transcription failed";
   await TranscriptionModel.markFailed(transcriptionId, message);
   await CallModel.updateStatus(callId, "PYAI_FAILED");
 }
 
-async function pollExistingPyaiJob(callId: string, transcriptionId: string, jobId: string) {
+async function pollExistingPyaiJob(
+  callId: string,
+  transcriptionId: string,
+  jobId: string
+) {
   try {
     const result = await finishPyaiJob(jobId);
     return await persistPyaiSuccess(callId, transcriptionId, result);
   } catch (error) {
     if (error instanceof PyaiPollTimeoutError) {
-      console.error("PyAI job still running; leaving transcription in PYAI_TRANSCRIBING");
+      console.error(
+        "PyAI job still running; leaving transcription in PYAI_TRANSCRIBING"
+      );
       return null;
     }
     await failPyai(callId, transcriptionId, error);
@@ -118,11 +154,84 @@ const mimeByExt: Record<string, string> = {
   ".webm": "audio/webm",
 };
 
+const PYAI_MULTIPART_MAX_BYTES = 24 * 1024 * 1024;
+
+function httpsSourceUrl(value: string | null | undefined): string | undefined {
+  if (!value || !/^https:\/\//i.test(value)) return undefined;
+  return value;
+}
+
+function pyaiFetchBase(): string | undefined {
+  const candidates = [env.PYAI_FETCH_BASE_URL, env.API_PUBLIC_URL];
+  return candidates.find((value) => value && pyaiCanFetchUrl(`${value}/`));
+}
+
+const LARGE_FETCH_HINT =
+  "PyAI cannot fetch local MinIO and this recording is too large to upload (413). Set S3_PUBLIC_ENDPOINT (tunnel to MinIO) or PYAI_FETCH_BASE_URL (https tunnel to this API).";
+
+async function transcribeFromCall(call: {
+  id: string;
+  filename: string | null;
+  storage_path: string | null;
+  source_url: string | null;
+}, rowId: string) {
+  const filename = call.filename || call.storage_path || "call.mp3";
+  const mimeType = mimeForAudio(filename, mimeByExt[extname(filename).toLowerCase()]);
+  const linkedUrl = httpsSourceUrl(call.source_url);
+
+  let audioUrl = linkedUrl;
+  let blob: Blob | undefined;
+  let cleanup: (() => Promise<void>) | undefined;
+
+  try {
+    if (!audioUrl && call.storage_path && isObjectKey(call.storage_path)) {
+      const signed = await presignGetForProvider(call.storage_path);
+      if (pyaiCanFetchUrl(signed)) {
+        audioUrl = signed;
+      } else {
+        const fetchBase = pyaiFetchBase();
+        if (fetchBase) {
+          audioUrl = providerAudioUrl(fetchBase, call.id);
+        } else {
+          const meta = await headObject(call.storage_path);
+          if (meta.contentLength > PYAI_MULTIPART_MAX_BYTES) {
+            throw new Error(LARGE_FETCH_HINT);
+          }
+          const materialized = await materializeObjectBlob(call.storage_path, mimeType);
+          blob = materialized.blob;
+          cleanup = materialized.cleanup;
+        }
+      }
+    } else if (!audioUrl && call.storage_path) {
+      const absolutePath = resolve(uploadRoot, call.storage_path);
+      if (!existsSync(absolutePath)) {
+        throw new Error("Call recording is not available");
+      }
+      blob = await openAsBlob(absolutePath, { type: mimeType });
+    }
+
+    if (!audioUrl && !blob) {
+      throw new Error("Call recording is not available");
+    }
+
+    return await transcribeAudioFile(
+      { filename, mimeType, audioUrl, blob },
+      {
+        onJobSubmitted: async (jobId) => {
+          await TranscriptionModel.markTranscribing(rowId, jobId);
+        },
+      },
+    );
+  } finally {
+    await cleanup?.();
+  }
+}
+
 export const TranscriptionService = {
   async transcribeCall(callId: string) {
     const call = await CallModel.findById(callId);
-    if (!call?.storage_path) {
-      throw new Error("Call recording is not available on disk");
+    if (!call?.storage_path && !httpsSourceUrl(call?.source_url)) {
+      throw new Error("Call recording is not available");
     }
 
     const row = await TranscriptionModel.create({
@@ -135,26 +244,13 @@ export const TranscriptionService = {
     }
 
     try {
-      const filename = call.filename || call.storage_path;
-      const ext = extname(filename).toLowerCase();
-      const result = await transcribeAudioFile(
-        {
-          absolutePath: resolve(uploadRoot, call.storage_path),
-          filename,
-          mimeType: mimeByExt[ext] ?? "application/octet-stream",
-          audioUrl: call.source_url && /^https?:\/\//i.test(call.source_url) ? call.source_url : undefined,
-        },
-        {
-          onJobSubmitted: async (jobId) => {
-            await TranscriptionModel.markTranscribing(row.id, jobId);
-          },
-        },
-      );
-
+      const result = await transcribeFromCall(call!, row.id);
       return persistPyaiSuccess(callId, row.id, result);
     } catch (error) {
       if (error instanceof PyaiPollTimeoutError) {
-        console.error("PyAI job still running; leaving transcription in PYAI_TRANSCRIBING");
+        console.error(
+          "PyAI job still running; leaving transcription in PYAI_TRANSCRIBING"
+        );
         return null;
       }
       await failPyai(callId, row.id, error);
@@ -166,10 +262,13 @@ export const TranscriptionService = {
     const rows = await TranscriptionModel.listInFlightPyai();
     for (const row of rows) {
       if (!row.provider_job_id) continue;
-      void pollExistingPyaiJob(row.call_id, row.id, row.provider_job_id).catch((error) => {
-        const message = error instanceof Error ? error.message : "Transcription failed";
-        console.error("Resumed transcription failed:", message);
-      });
+      void pollExistingPyaiJob(row.call_id, row.id, row.provider_job_id).catch(
+        (error) => {
+          const message =
+            error instanceof Error ? error.message : "Transcription failed";
+          console.error("Resumed transcription failed:", message);
+        }
+      );
     }
   },
 
@@ -177,7 +276,9 @@ export const TranscriptionService = {
     return TranscriptionModel.listByCallId(callId);
   },
 
-  async inferAndRenameSpeakers(transcription: TranscriptionRecord): Promise<InferAndRenameResult> {
+  async inferAndRenameSpeakers(
+    transcription: TranscriptionRecord
+  ): Promise<InferAndRenameResult> {
     // Guard: only pick up transcriptions that are actually in PYAI_SUCCESS.
     // Checked on the transcription itself, not the call — a call can have
     // multiple transcription rows (retries), each with its own status, so
@@ -222,7 +323,9 @@ export const TranscriptionService = {
         };
       }
 
-      const cached = await CallTranscriptModel.findByTranscriptionId(transcription.id);
+      const cached = await CallTranscriptModel.findByTranscriptionId(
+        transcription.id
+      );
       if (cached) {
         await TranscriptionModel.markLLMSuccess(transcription.id);
         return {
@@ -251,15 +354,23 @@ export const TranscriptionService = {
       // KB chunking/embedding blocks the other) — a slow or failing one
       // must never hold up the other coming online.
       try {
-        await publishCallInsightsJob({ callId: transcription.call_id, transcriptionId: transcription.id });
+        await publishCallInsightsJob({
+          callId: transcription.call_id,
+          transcriptionId: transcription.id,
+        });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Queue publish failed";
+        const message =
+          error instanceof Error ? error.message : "Queue publish failed";
         console.error("Could not enqueue call-insights:", message);
       }
       try {
-        await publishKbIngestJob({ callId: transcription.call_id, transcriptionId: transcription.id });
+        await publishKbIngestJob({
+          callId: transcription.call_id,
+          transcriptionId: transcription.id,
+        });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Queue publish failed";
+        const message =
+          error instanceof Error ? error.message : "Queue publish failed";
         console.error("Could not enqueue kb-ingest:", message);
       }
 
@@ -267,7 +378,8 @@ export const TranscriptionService = {
       await saveNamedTranscript(transcription, named, inferred, true);
       return { inferred, transcript: named, readable };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Speaker inference failed";
+      const message =
+        error instanceof Error ? error.message : "Speaker inference failed";
       await TranscriptionModel.markLLMFailed(transcription.id, message);
       throw error;
     }

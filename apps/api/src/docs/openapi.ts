@@ -380,6 +380,19 @@ export const openApiSpec = {
           dealId: { type: "string", format: "uuid", description: "Required when scopeType is 'deal'" },
         },
       },
+      Conversation: {
+        type: "object",
+        properties: {
+          id: { type: "string", format: "uuid" },
+          scope_type: { type: "string", enum: ["call", "deal"] },
+          scope_call_id: { type: "string", format: "uuid", nullable: true },
+          scope_deal_id: { type: "string", format: "uuid", nullable: true },
+          title: { type: "string", nullable: true },
+          turn_count: { type: "integer" },
+          created_at: { type: "string", format: "date-time" },
+          last_activity_at: { type: "string", format: "date-time" },
+        },
+      },
       CreateConversationResponse: {
         type: "object",
         properties: {
@@ -453,6 +466,39 @@ export const openApiSpec = {
           url: { type: "string", format: "uri", maxLength: 2048 },
           dealId: { type: "string", format: "uuid", nullable: true },
           label: { type: "string", maxLength: 200 },
+        },
+      },
+      PresignUploadRequest: {
+        type: "object",
+        required: ["filename", "size"],
+        properties: {
+          filename: { type: "string", minLength: 1, maxLength: 240 },
+          contentType: { type: "string", maxLength: 100 },
+          size: { type: "integer", minimum: 1, description: "Declared file size in bytes" },
+          dealId: { type: "string", format: "uuid", nullable: true },
+        },
+      },
+      PresignUploadResponse: {
+        type: "object",
+        required: ["objectKey", "uploadUrl", "headers", "expiresIn"],
+        properties: {
+          objectKey: { type: "string" },
+          uploadUrl: { type: "string", format: "uri" },
+          headers: {
+            type: "object",
+            additionalProperties: { type: "string" },
+            description: "Headers the client must send on the PUT. Do not log uploadUrl.",
+          },
+          expiresIn: { type: "integer", description: "Seconds until the PUT URL expires" },
+        },
+      },
+      CompleteUploadRequest: {
+        type: "object",
+        required: ["objectKey", "filename"],
+        properties: {
+          objectKey: { type: "string", minLength: 1, maxLength: 512 },
+          filename: { type: "string", minLength: 1, maxLength: 240 },
+          dealId: { type: "string", format: "uuid", nullable: true },
         },
       },
       UpdateCallRequest: {
@@ -821,12 +867,70 @@ export const openApiSpec = {
         },
       },
     },
+    "/api/calls/uploads/presign": {
+      post: {
+        tags: ["Calls"],
+        summary: "Mint a presigned upload URL",
+        description:
+          "Returns a short-lived PUT URL for S3-compatible object storage. The browser uploads the file directly, then calls POST /api/calls/uploads/complete. Do not log the URL.",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/PresignUploadRequest" } },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Presigned PUT",
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/PresignUploadResponse" } },
+            },
+          },
+          "400": { description: "Unsupported type or invalid deal" },
+          "401": { description: "Authentication required" },
+          "413": { description: "File too large" },
+          "503": { description: "Object storage is not configured" },
+        },
+      },
+    },
+    "/api/calls/uploads/complete": {
+      post: {
+        tags: ["Calls"],
+        summary: "Finish a direct object-storage upload",
+        description:
+          "Confirms the object exists in the private bucket, creates the call, and starts PyAI Hear with a presigned audio_url (PyAI fetches the object; the API does not re-upload the bytes).",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/CompleteUploadRequest" } },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Call created; transcription started",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { call: { $ref: "#/components/schemas/Call" } },
+                },
+              },
+            },
+          },
+          "400": { description: "Invalid key, missing object, or unknown deal" },
+          "401": { description: "Authentication required" },
+          "413": { description: "File too large" },
+        },
+      },
+    },
     "/api/calls/upload": {
       post: {
         tags: ["Calls"],
         summary: "Upload a recording",
         description:
-          "Multipart upload. Field name must be `file`. Optional `dealId`. Transcription runs in the background via PyAI Hear. Poll GET /api/calls/{id} until the transcription status is PYAI_SUCCESS or PYAI_FAILED.",
+          "Multipart upload. Field name must be `file`. Optional `dealId`. The API stores the file in object storage and starts PyAI Hear. Prefer POST /api/calls/uploads/presign for large files. Poll GET /api/calls/{id} until the transcription status is PYAI_SUCCESS or PYAI_FAILED.",
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -1150,6 +1254,49 @@ export const openApiSpec = {
       },
     },
     "/api/conversations": {
+      get: {
+        tags: ["Chat"],
+        summary: "List AI chat conversations for the current user",
+        description:
+          "Returns the signed-in user's conversations, newest activity first. Optional `callId` or `dealId` filters to chats on that call or deal.",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "callId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+            description: "Only conversations scoped to this call",
+          },
+          {
+            name: "dealId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+            description: "Only conversations scoped to this deal",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Conversations for the current user",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    conversations: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/Conversation" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "Validation failed" },
+          "401": { description: "Authentication required" },
+        },
+      },
       post: {
         tags: ["Chat"],
         summary: "Start a chat conversation scoped to one call or one deal",
@@ -1167,6 +1314,74 @@ export const openApiSpec = {
           "401": { description: "Authentication required" },
           "403": { description: "Not allowed to access this call/deal" },
           "404": { description: "Call or deal not found" },
+        },
+      },
+    },
+    "/api/conversations/search": {
+      get: {
+        tags: ["Chat"],
+        summary: "Search the current user's conversations by title",
+        description:
+          "Case-insensitive substring match on `conversations.title`. Results are limited to the signed-in user's conversations in their organization, newest activity first. Optional `callId` or `dealId` further filters to chats on that call or deal. Conversations with a null title are not returned.",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "q",
+            in: "query",
+            required: true,
+            schema: { type: "string", minLength: 1, maxLength: 200 },
+            description: "Substring to match against conversation title",
+          },
+          {
+            name: "callId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+            description: "Only conversations scoped to this call",
+          },
+          {
+            name: "dealId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+            description: "Only conversations scoped to this deal",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Matching conversations for the current user",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    conversations: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/Conversation" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "Validation failed" },
+          "401": { description: "Authentication required" },
+        },
+      },
+    },
+    "/api/conversations/{id}": {
+      delete: {
+        tags: ["Chat"],
+        summary: "Delete a conversation",
+        description:
+          "Deletes the signed-in user's conversation. Messages are removed with it (ON DELETE CASCADE). Returns 404 if the conversation does not exist or belongs to another user.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: "#/components/parameters/UuidId" }],
+        responses: {
+          "204": { description: "Conversation deleted" },
+          "400": { description: "Validation failed" },
+          "401": { description: "Authentication required" },
+          "404": { description: "Conversation not found" },
         },
       },
     },

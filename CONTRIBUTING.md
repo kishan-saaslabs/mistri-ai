@@ -18,16 +18,15 @@ Thanks for helping build an open-source alternative to Gong. This document cover
    pnpm install
    ```
 
-3. Copy `.env.example` to `.env` and set `POSTGRES_PASSWORD`, `JWT_SECRET` (at least 32 random characters), `PYAI_API_KEY`, and `SEED_USER_PASSWORD` (min 10 characters) if you run the seed.
-4. Start Postgres and apply schema:
+3. Run bootstrap (creates `.env` if needed, starts Postgres + Redis, migrates, seeds):
 
    ```bash
-   pnpm db:up
-   pnpm db:migrate
-   pnpm db:seed
+   pnpm bootstrap
    ```
 
-5. Run both apps:
+   Add `PYAI_API_KEY` and `LLM_API_KEY` in `.env` for live transcription and notes.
+
+4. Run both apps:
 
    ```bash
    pnpm dev
