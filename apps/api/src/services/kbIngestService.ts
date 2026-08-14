@@ -10,6 +10,7 @@ import {
   tokenCount,
   windowTranscript,
   type Chunk,
+  type EmbeddingClient,
 } from "@mistri-ai/ai";
 import { CallTranscriptModel } from "../models/callTranscriptModel.js";
 import { ChunkEmbeddingModel } from "../models/chunkEmbeddingModel.js";
@@ -22,9 +23,8 @@ function bodyHash(body: string): string {
   return createHash("sha256").update(body).digest("hex");
 }
 
-async function embedAll(bodies: string[]): Promise<number[][]> {
+async function embedAll(client: EmbeddingClient, bodies: string[]): Promise<number[][]> {
   if (bodies.length === 0) return [];
-  const client = getEmbeddingClient();
   const results: number[][] = [];
   for (let i = 0; i < bodies.length; i += EMBEDDING_BATCH) {
     const batch = bodies.slice(i, i + EMBEDDING_BATCH);
@@ -59,6 +59,7 @@ export const KbIngestService = {
     await CallTranscriptModel.markKbProcessing(transcriptionId);
 
     try {
+      const embeddingClient = getEmbeddingClient();
       const transcript = callTranscript.segments;
       const l2Chunks = windowTranscript(transcript);
 
@@ -69,7 +70,7 @@ export const KbIngestService = {
         return;
       }
 
-      const l2Embeddings = await embedAll(l2Chunks.map((c) => c.body));
+      const l2Embeddings = await embedAll(embeddingClient, l2Chunks.map((c) => c.body));
 
       const candidateSignals = detectCandidateBoundaries(l2Chunks, l2Embeddings, transcript);
       const topicGroups = constrainTopics(l2Chunks, l2Embeddings, candidateSignals);
@@ -145,7 +146,7 @@ export const KbIngestService = {
         };
       });
 
-      const topicSummaryEmbeddings = await embedAll(topicSummaryChunks.map((c) => c.body));
+      const topicSummaryEmbeddings = await embedAll(embeddingClient, topicSummaryChunks.map((c) => c.body));
 
       // Tag each L2 chunk's attribution_uncertain from the same speaker-
       // confidence join used for topics — propagating the signal this
@@ -196,7 +197,12 @@ export const KbIngestService = {
         chunkRows,
       );
 
-      const embeddingModel = "kb-v1"; // logged label only; see llmConfig.modelEmbedding for the actual provider model
+      // The REAL configured model name, not a placeholder — confirmed live
+      // that a hardcoded label here made an actual embedding-model-switch
+      // bug (stale vectors from the old provider silently compared against
+      // new-provider query vectors — same width, incompatible space, no
+      // error) far harder to diagnose than it needed to be.
+      const embeddingModel = embeddingClient.model;
       const embeddingRows = [
         ...taggedL2Chunks.map((c, i) => ({ chunkKey: `turn_window:${c.seq}`, embedding: l2Embeddings[i]! })),
         ...topicSummaryChunks.map((c, i) => ({

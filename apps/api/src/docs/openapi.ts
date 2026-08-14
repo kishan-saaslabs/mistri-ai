@@ -328,7 +328,7 @@ export const openApiSpec = {
         required: ["query", "scopeType"],
         properties: {
           query: { type: "string", minLength: 1, maxLength: 2000 },
-          scopeType: { type: "string", enum: ["call", "deal"] },
+          scopeType: { type: "string", enum: ["call", "deal", "global"] },
           callId: { type: "string", format: "uuid", description: "Required when scopeType is 'call'" },
           dealId: { type: "string", format: "uuid", description: "Required when scopeType is 'deal'" },
         },
@@ -370,7 +370,12 @@ export const openApiSpec = {
         type: "object",
         required: ["scopeType"],
         properties: {
-          scopeType: { type: "string", enum: ["call", "deal"] },
+          scopeType: {
+            type: "string",
+            enum: ["call", "deal", "global"],
+            description:
+              "'global' needs neither callId nor dealId — it resolves to every call this specific user can already see (owner/admin: every call in the org; member: only calls they're assigned to via user_deals, plus their own unassigned uploads). Same access rule as every other list endpoint, not a new permission.",
+          },
           callId: { type: "string", format: "uuid", description: "Required when scopeType is 'call'" },
           dealId: { type: "string", format: "uuid", description: "Required when scopeType is 'deal'" },
         },
@@ -391,6 +396,19 @@ export const openApiSpec = {
         required: ["content"],
         properties: {
           content: { type: "string", minLength: 1, maxLength: 4000 },
+          focusDealIds: {
+            type: "array",
+            items: { type: "string", format: "uuid" },
+            maxItems: 50,
+            description:
+              "Only valid when this conversation's scopeType is 'global'. Narrows 'everything you have access to' down to just these deals for THIS question only — not persisted, so a later message with no focus (or a different one) isn't bound by it. Re-checked against live ACL every time it's sent.",
+          },
+          focusCallIds: {
+            type: "array",
+            items: { type: "string", format: "uuid" },
+            maxItems: 50,
+            description: "Same as focusDealIds but for individual calls; combines with focusDealIds (union). 'global' scope only.",
+          },
         },
       },
       ChatCitation: {

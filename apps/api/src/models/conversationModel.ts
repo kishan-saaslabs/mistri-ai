@@ -1,6 +1,6 @@
 import { query, queryOne } from "../config/database.js";
 
-export type ChatScopeType = "call" | "deal";
+export type ChatScopeType = "call" | "deal" | "global";
 
 export type ConversationRecord = {
   id: string;

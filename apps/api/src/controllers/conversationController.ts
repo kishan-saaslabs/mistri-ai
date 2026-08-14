@@ -7,16 +7,26 @@ import { HttpError } from "../utils/httpError.js";
 
 const createConversationSchema = z
   .object({
-    scopeType: z.enum(["call", "deal"]),
+    scopeType: z.enum(["call", "deal", "global"]),
     callId: z.string().uuid().optional(),
     dealId: z.string().uuid().optional(),
   })
-  .refine((v) => (v.scopeType === "call" ? !!v.callId : !!v.dealId), {
-    message: "callId is required for scopeType 'call'; dealId is required for scopeType 'deal'",
-  });
+  .refine(
+    (v) => {
+      if (v.scopeType === "call") return !!v.callId;
+      if (v.scopeType === "deal") return !!v.dealId;
+      return true; // 'global' needs neither — it's every call this user can already see
+    },
+    { message: "callId is required for scopeType 'call'; dealId is required for scopeType 'deal'" },
+  );
 
 const postMessageSchema = z.object({
   content: z.string().trim().min(1).max(4000),
+  // 'global'-conversation-only: narrow "everything you have access to" down
+  // to a specific set of deals/calls FOR THIS QUESTION — a later message in
+  // the same thread with no focus (or a different one) isn't bound by it.
+  focusDealIds: z.array(z.string().uuid()).max(50).optional(),
+  focusCallIds: z.array(z.string().uuid()).max(50).optional(),
 });
 
 function sseWrite(res: Response, event: string, data: unknown) {
@@ -66,7 +76,10 @@ export const ConversationController = {
       sseWrite(res, "stage", { stage: "authorizing" });
       sseWrite(res, "stage", { stage: "retrieving" });
 
-      const message = await ChatService.postMessage(actor.id, conversationId, body.content);
+      const message = await ChatService.postMessage(actor.id, conversationId, body.content, {
+        focusDealIds: body.focusDealIds,
+        focusCallIds: body.focusCallIds,
+      });
 
       sseWrite(res, "stage", { stage: "generating" });
       sseWrite(res, "answer", { text: message?.content ?? "" });

@@ -92,10 +92,18 @@ export function getEmbeddingClient(): EmbeddingClient {
     );
   }
 
+  // See embeddingClient.ts's wireFormat comment: NIM and OpenAI need
+  // opposite request bodies for this endpoint. "openai" is selected only
+  // when the label explicitly says so; every other label (nvidia, or
+  // anything else) keeps the NIM-shaped request, since that's the only
+  // other wire format actually verified live so far.
+  const wireFormat = llmConfig.providerLabelEmbedding.toLowerCase() === "openai" ? "openai" : "nim";
+
   return new OpenAiCompatibleEmbeddingClient({
     baseUrl: llmConfig.baseUrlEmbedding,
     apiKey,
     model: llmConfig.modelEmbedding,
     dimensions: llmConfig.embeddingDimensions,
+    wireFormat,
   });
 }

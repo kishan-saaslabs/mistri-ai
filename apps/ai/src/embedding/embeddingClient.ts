@@ -1,5 +1,16 @@
 export interface EmbeddingClient {
   /**
+   * The actual configured model name (e.g. "text-embedding-3-large"), NOT
+   * a placeholder label — this is what gets recorded on chunk_embeddings
+   * rows. Confirmed live: a hardcoded label here made a real embedding-
+   * model-switch bug (stale NVIDIA vectors compared against new OpenAI
+   * query vectors — same dimension, completely incompatible space, no
+   * error, just silently meaningless retrieval) far harder to diagnose
+   * than it needed to be. Every row should say what actually produced it.
+   */
+  readonly model: string;
+
+  /**
    * Embeds a batch of texts. `kind` distinguishes document-time text
    * (chunk bodies, long third-person dialogue) from query-time text
    * (short first-person questions) — some providers accept an input-type
@@ -13,6 +24,23 @@ export type OpenAiCompatibleEmbeddingClientConfig = {
   apiKey: string;
   model: string;
   dimensions: number;
+  /**
+   * Which provider's embeddings request quirks to speak — confirmed live
+   * that these two are opposite in exactly the fields that matter:
+   * - "nim": NVIDIA NIM's asymmetric-encoder models (e.g. nv-embedqa-e5-v5)
+   *   require `input_type: 'query'|'passage'` and reject the request
+   *   outright if `dimensions` is present at all.
+   * - "openai": real OpenAI's /v1/embeddings has no asymmetric-encoder
+   *   concept (no `input_type`) and validates its request schema strictly
+   *   — sending an unrecognized field risks an outright 400, not a
+   *   silently-ignored one. It DOES need `dimensions` to get anything
+   *   other than the model's native width (3072 for text-embedding-3-large),
+   *   which is exactly the parameter NIM rejects.
+   * Set explicitly by the caller (getEmbeddingClient) from the configured
+   * provider label — never guessed here. A third provider needs its own
+   * verified entry, not an assumption that one of these two applies.
+   */
+  wireFormat: "nim" | "openai";
 };
 
 /**
@@ -27,36 +55,43 @@ export type OpenAiCompatibleEmbeddingClientConfig = {
 export class OpenAiCompatibleEmbeddingClient implements EmbeddingClient {
   constructor(private readonly config: OpenAiCompatibleEmbeddingClientConfig) {}
 
+  get model(): string {
+    return this.config.model;
+  }
+
   async embed(texts: string[], kind: "document" | "query"): Promise<number[][]> {
     if (texts.length === 0) return [];
 
-    // NVIDIA NIM's embedding endpoints (confirmed live against
-    // nv-embedqa-e5-v5) use the asymmetric-encoder convention
-    // 'query'/'passage' for input_type, not OpenAI's own
-    // document/query wording — this is the one field this wire format
-    // isn't actually shared verbatim across providers, so it's translated
-    // here rather than passed through raw.
-    const inputType = kind === "document" ? "passage" : "query";
+    const body: Record<string, unknown> = {
+      model: this.config.model,
+      input: texts,
+    };
 
-    // `dimensions` (OpenAI's truncation parameter) is NOT sent — confirmed
-    // live that at least one NIM embedding model (nv-embedqa-e5-v5) rejects
-    // the request outright if it's present at all, unlike OpenAI's
-    // text-embedding-3-* models where it's optional truncation. Instead,
-    // `this.config.dimensions` is enforced below as a response-shape
-    // invariant: the fixed-width `vector(N)` Postgres column can't safely
-    // accept a mismatched length, so a provider/model returning a
-    // different size fails loudly here rather than corrupting the column.
+    if (this.config.wireFormat === "nim") {
+      // NVIDIA NIM's asymmetric-encoder models (confirmed live against
+      // nv-embedqa-e5-v5) use 'query'/'passage', not OpenAI's own
+      // document/query wording, and reject the request outright if
+      // `dimensions` is present at all.
+      body.input_type = kind === "document" ? "passage" : "query";
+    } else {
+      // Real OpenAI: no input_type concept, but `dimensions` is required
+      // to get anything narrower than the model's native width (3072 for
+      // text-embedding-3-large) — the exact parameter NIM rejects.
+      body.dimensions = this.config.dimensions;
+    }
+
+    // `this.config.dimensions` is ALSO enforced below as a response-shape
+    // invariant regardless of wireFormat: the fixed-width `vector(N)`
+    // Postgres column can't safely accept a mismatched length, so a
+    // provider/model returning an unexpected size fails loudly here
+    // rather than silently corrupting the column.
     const response = await fetch(`${this.config.baseUrl}/embeddings`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.config.apiKey}`,
       },
-      body: JSON.stringify({
-        model: this.config.model,
-        input: texts,
-        input_type: inputType,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
