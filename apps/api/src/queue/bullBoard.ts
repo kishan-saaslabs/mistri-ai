@@ -5,6 +5,7 @@ import type { Express } from "express";
 import helmet from "helmet";
 import { callInsightsQueue } from "./callInsightsQueue.js";
 import { inferAndRenameQueue } from "./inferAndRenameQueue.js";
+import { kbIngestQueue } from "./kbIngestQueue.js";
 
 /**
  * Read-only-ish debug UI for BullMQ queues, mounted the same way Swagger
@@ -18,7 +19,11 @@ export function mountBullBoard(app: Express) {
   serverAdapter.setBasePath("/admin/queues");
 
   createBullBoard({
-    queues: [new BullMQAdapter(inferAndRenameQueue), new BullMQAdapter(callInsightsQueue)],
+    queues: [
+      new BullMQAdapter(inferAndRenameQueue),
+      new BullMQAdapter(callInsightsQueue),
+      new BullMQAdapter(kbIngestQueue),
+    ],
     serverAdapter,
   });
 

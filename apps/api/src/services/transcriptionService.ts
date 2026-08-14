@@ -15,6 +15,7 @@ import { CallTranscriptModel } from "../models/callTranscriptModel.js";
 import { TranscriptionModel, type TranscriptionRecord } from "../models/transcriptionModel.js";
 import { publishCallInsightsJob } from "../queue/callInsightsQueue.js";
 import { publishInferAndRenameJob } from "../queue/inferAndRenameQueue.js";
+import { publishKbIngestJob } from "../queue/kbIngestQueue.js";
 import { transcribeAudioFile } from "./pyaiHear.js";
 
 export type InferAndRenameResult = {
@@ -168,15 +169,24 @@ export const TranscriptionService = {
         inferredSpeakers: inferred,
       });
 
-      // A fresh named transcript now exists — publish the next pipeline
-      // stage. Not published on the cache-hit / short-circuit paths above:
-      // those don't produce a new call_transcripts row, so there'd be
-      // nothing new for call-insights to read.
+      // A fresh named transcript now exists — publish both downstream
+      // pipeline stages. Not published on the cache-hit / short-circuit
+      // paths above: those don't produce a new call_transcripts row, so
+      // there'd be nothing new for either to read. The two are
+      // independent of each other (neither call-insights extraction nor
+      // KB chunking/embedding blocks the other) — a slow or failing one
+      // must never hold up the other coming online.
       try {
         await publishCallInsightsJob({ callId: transcription.call_id, transcriptionId: transcription.id });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Queue publish failed";
         console.error("Could not enqueue call-insights:", message);
+      }
+      try {
+        await publishKbIngestJob({ callId: transcription.call_id, transcriptionId: transcription.id });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Queue publish failed";
+        console.error("Could not enqueue kb-ingest:", message);
       }
 
       await TranscriptionModel.markLLMSuccess(transcription.id);
