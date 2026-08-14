@@ -450,6 +450,39 @@ export const openApiSpec = {
           label: { type: "string", maxLength: 200 },
         },
       },
+      PresignUploadRequest: {
+        type: "object",
+        required: ["filename", "size"],
+        properties: {
+          filename: { type: "string", minLength: 1, maxLength: 240 },
+          contentType: { type: "string", maxLength: 100 },
+          size: { type: "integer", minimum: 1, description: "Declared file size in bytes" },
+          dealId: { type: "string", format: "uuid", nullable: true },
+        },
+      },
+      PresignUploadResponse: {
+        type: "object",
+        required: ["objectKey", "uploadUrl", "headers", "expiresIn"],
+        properties: {
+          objectKey: { type: "string" },
+          uploadUrl: { type: "string", format: "uri" },
+          headers: {
+            type: "object",
+            additionalProperties: { type: "string" },
+            description: "Headers the client must send on the PUT. Do not log uploadUrl.",
+          },
+          expiresIn: { type: "integer", description: "Seconds until the PUT URL expires" },
+        },
+      },
+      CompleteUploadRequest: {
+        type: "object",
+        required: ["objectKey", "filename"],
+        properties: {
+          objectKey: { type: "string", minLength: 1, maxLength: 512 },
+          filename: { type: "string", minLength: 1, maxLength: 240 },
+          dealId: { type: "string", format: "uuid", nullable: true },
+        },
+      },
       UpdateCallRequest: {
         type: "object",
         required: ["dealId"],
@@ -816,12 +849,70 @@ export const openApiSpec = {
         },
       },
     },
+    "/api/calls/uploads/presign": {
+      post: {
+        tags: ["Calls"],
+        summary: "Mint a presigned upload URL",
+        description:
+          "Returns a short-lived PUT URL for S3-compatible object storage. The browser uploads the file directly, then calls POST /api/calls/uploads/complete. Do not log the URL.",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/PresignUploadRequest" } },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Presigned PUT",
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/PresignUploadResponse" } },
+            },
+          },
+          "400": { description: "Unsupported type or invalid deal" },
+          "401": { description: "Authentication required" },
+          "413": { description: "File too large" },
+          "503": { description: "Object storage is not configured" },
+        },
+      },
+    },
+    "/api/calls/uploads/complete": {
+      post: {
+        tags: ["Calls"],
+        summary: "Finish a direct object-storage upload",
+        description:
+          "Confirms the object exists in the private bucket, creates the call, and starts PyAI Hear with a presigned audio_url (PyAI fetches the object; the API does not re-upload the bytes).",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/CompleteUploadRequest" } },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Call created; transcription started",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { call: { $ref: "#/components/schemas/Call" } },
+                },
+              },
+            },
+          },
+          "400": { description: "Invalid key, missing object, or unknown deal" },
+          "401": { description: "Authentication required" },
+          "413": { description: "File too large" },
+        },
+      },
+    },
     "/api/calls/upload": {
       post: {
         tags: ["Calls"],
         summary: "Upload a recording",
         description:
-          "Multipart upload. Field name must be `file`. Optional `dealId`. Transcription runs in the background via PyAI Hear. Poll GET /api/calls/{id} until the transcription status is PYAI_SUCCESS or PYAI_FAILED.",
+          "Multipart upload. Field name must be `file`. Optional `dealId`. The API stores the file in object storage and starts PyAI Hear. Prefer POST /api/calls/uploads/presign for large files. Poll GET /api/calls/{id} until the transcription status is PYAI_SUCCESS or PYAI_FAILED.",
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,

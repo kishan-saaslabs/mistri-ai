@@ -122,6 +122,35 @@ async function ensureEnv() {
     generated.push("REDIS_URL");
   }
 
+  if (needsSecret(envValue(contents, "S3_ACCESS_KEY"))) {
+    contents = setEnv(contents, "S3_ACCESS_KEY", "mistri");
+  }
+  if (needsSecret(envValue(contents, "S3_SECRET_KEY"))) {
+    contents = setEnv(contents, "S3_SECRET_KEY", randomBytes(24).toString("hex"));
+    generated.push("S3_SECRET_KEY");
+  }
+  if (needsSecret(envValue(contents, "S3_BUCKET"))) {
+    contents = setEnv(contents, "S3_BUCKET", "mistri-calls");
+  }
+  if (needsSecret(envValue(contents, "S3_ENDPOINT"))) {
+    contents = setEnv(contents, "S3_ENDPOINT", "http://localhost:9000");
+  }
+  if (needsSecret(envValue(contents, "S3_BROWSER_ENDPOINT"))) {
+    contents = setEnv(contents, "S3_BROWSER_ENDPOINT", "http://localhost:9000");
+  }
+  if (needsSecret(envValue(contents, "S3_REGION"))) {
+    contents = setEnv(contents, "S3_REGION", "us-east-1");
+  }
+  if (needsSecret(envValue(contents, "S3_PORT"))) {
+    contents = setEnv(contents, "S3_PORT", "9000");
+  }
+  if (needsSecret(envValue(contents, "S3_CONSOLE_PORT"))) {
+    contents = setEnv(contents, "S3_CONSOLE_PORT", "9001");
+  }
+  if (needsSecret(envValue(contents, "S3_FORCE_PATH_STYLE"))) {
+    contents = setEnv(contents, "S3_FORCE_PATH_STYLE", "true");
+  }
+
   await writeFile(envPath, contents.endsWith("\n") ? contents : `${contents}\n`);
   if (generated.length) {
     console.log(`Filled empty local secrets in .env: ${generated.join(", ")}`);
@@ -131,7 +160,7 @@ async function ensureEnv() {
 }
 
 async function dockerUp() {
-  await run("docker", ["compose", "up", "-d", "--wait", "postgres", "redis"]);
+  await run("docker", ["compose", "up", "-d", "--wait", "postgres", "redis", "minio"]);
 }
 
 async function migrate() {
@@ -174,7 +203,7 @@ async function main() {
   const envContents = await ensureEnv();
   await mkdir(resolve(root, "uploads"), { recursive: true });
 
-  console.log("Starting Postgres (pgvector) and Redis…");
+  console.log("Starting Postgres (pgvector), Redis, and MinIO…");
   await dockerUp();
 
   console.log("Applying schema…");

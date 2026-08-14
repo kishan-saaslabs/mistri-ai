@@ -5,6 +5,7 @@ import { startCallInsightsWorker } from "./queue/callInsightsWorker.js";
 import { startInferAndRenameWorker } from "./queue/inferAndRenameWorker.js";
 import { startKbIngestWorker } from "./queue/kbIngestWorker.js";
 import { redisConnection } from "./queue/redisConnection.js";
+import { ensureObjectStorage } from "./services/objectStorage.js";
 import { TranscriptionService } from "./services/transcriptionService.js";
 
 const app = createApp();
@@ -12,6 +13,11 @@ const app = createApp();
 const server = app.listen(env.API_PORT, () => {
   console.log(`API listening on http://localhost:${env.API_PORT}`);
   console.log(`Swagger UI: http://localhost:${env.API_PORT}/docs`);
+});
+
+void ensureObjectStorage().catch((error) => {
+  const name = error instanceof Error ? error.name : "Error";
+  console.error("Could not initialize object storage:", name);
 });
 
 const inferAndRenameWorker = startInferAndRenameWorker();

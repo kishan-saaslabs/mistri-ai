@@ -29,6 +29,8 @@ apiRouter.get("/deals/:id/users", DealController.listUsers);
 apiRouter.post("/deals/:id/users", DealController.addUser);
 
 apiRouter.get("/calls", CallController.list);
+apiRouter.post("/calls/uploads/presign", CallController.presignUpload);
+apiRouter.post("/calls/uploads/complete", CallController.completeUpload);
 apiRouter.post("/calls/upload", callUpload.single("file"), CallController.upload);
 apiRouter.post("/calls/link", CallController.link);
 apiRouter.get("/calls/:id/file", CallController.file);

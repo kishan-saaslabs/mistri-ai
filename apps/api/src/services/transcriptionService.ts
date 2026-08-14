@@ -1,3 +1,4 @@
+import { existsSync, openAsBlob } from "node:fs";
 import { extname, resolve } from "node:path";
 import {
   applySpeakerNames,
@@ -9,6 +10,8 @@ import {
   type SpeakerMap,
 } from "@mistri-ai/ai";
 import { env } from "../config/env.js";
+import { mimeForAudio } from "../lib/audioFile.js";
+import { providerAudioUrl } from "../lib/providerAudioUrl.js";
 import { uploadRoot } from "../middleware/upload.js";
 import { CallModel } from "../models/callModel.js";
 import { CallTranscriptModel } from "../models/callTranscriptModel.js";
@@ -24,6 +27,13 @@ import {
   finishPyaiJob,
   PyaiPollTimeoutError,
 } from "./pyaiHear.js";
+import {
+  headObject,
+  isObjectKey,
+  materializeObjectBlob,
+  presignGetForProvider,
+  pyaiCanFetchUrl,
+} from "./objectStorage.js";
 
 export type InferAndRenameResult = {
   inferred: InferredSpeaker[];
@@ -143,11 +153,84 @@ const mimeByExt: Record<string, string> = {
   ".webm": "audio/webm",
 };
 
+const PYAI_MULTIPART_MAX_BYTES = 24 * 1024 * 1024;
+
+function httpsSourceUrl(value: string | null | undefined): string | undefined {
+  if (!value || !/^https:\/\//i.test(value)) return undefined;
+  return value;
+}
+
+function pyaiFetchBase(): string | undefined {
+  const candidates = [env.PYAI_FETCH_BASE_URL, env.API_PUBLIC_URL];
+  return candidates.find((value) => value && pyaiCanFetchUrl(`${value}/`));
+}
+
+const LARGE_FETCH_HINT =
+  "PyAI cannot fetch local MinIO and this recording is too large to upload (413). Set S3_PUBLIC_ENDPOINT (tunnel to MinIO) or PYAI_FETCH_BASE_URL (https tunnel to this API).";
+
+async function transcribeFromCall(call: {
+  id: string;
+  filename: string | null;
+  storage_path: string | null;
+  source_url: string | null;
+}, rowId: string) {
+  const filename = call.filename || call.storage_path || "call.mp3";
+  const mimeType = mimeForAudio(filename, mimeByExt[extname(filename).toLowerCase()]);
+  const linkedUrl = httpsSourceUrl(call.source_url);
+
+  let audioUrl = linkedUrl;
+  let blob: Blob | undefined;
+  let cleanup: (() => Promise<void>) | undefined;
+
+  try {
+    if (!audioUrl && call.storage_path && isObjectKey(call.storage_path)) {
+      const signed = await presignGetForProvider(call.storage_path);
+      if (pyaiCanFetchUrl(signed)) {
+        audioUrl = signed;
+      } else {
+        const fetchBase = pyaiFetchBase();
+        if (fetchBase) {
+          audioUrl = providerAudioUrl(fetchBase, call.id);
+        } else {
+          const meta = await headObject(call.storage_path);
+          if (meta.contentLength > PYAI_MULTIPART_MAX_BYTES) {
+            throw new Error(LARGE_FETCH_HINT);
+          }
+          const materialized = await materializeObjectBlob(call.storage_path, mimeType);
+          blob = materialized.blob;
+          cleanup = materialized.cleanup;
+        }
+      }
+    } else if (!audioUrl && call.storage_path) {
+      const absolutePath = resolve(uploadRoot, call.storage_path);
+      if (!existsSync(absolutePath)) {
+        throw new Error("Call recording is not available");
+      }
+      blob = await openAsBlob(absolutePath, { type: mimeType });
+    }
+
+    if (!audioUrl && !blob) {
+      throw new Error("Call recording is not available");
+    }
+
+    return await transcribeAudioFile(
+      { filename, mimeType, audioUrl, blob },
+      {
+        onJobSubmitted: async (jobId) => {
+          await TranscriptionModel.markTranscribing(rowId, jobId);
+        },
+      },
+    );
+  } finally {
+    await cleanup?.();
+  }
+}
+
 export const TranscriptionService = {
   async transcribeCall(callId: string) {
     const call = await CallModel.findById(callId);
-    if (!call?.storage_path) {
-      throw new Error("Call recording is not available on disk");
+    if (!call?.storage_path && !httpsSourceUrl(call?.source_url)) {
+      throw new Error("Call recording is not available");
     }
 
     const row = await TranscriptionModel.create({
@@ -160,25 +243,7 @@ export const TranscriptionService = {
     }
 
     try {
-      const filename = call.filename || call.storage_path;
-      const ext = extname(filename).toLowerCase();
-      const result = await transcribeAudioFile(
-        {
-          absolutePath: resolve(uploadRoot, call.storage_path),
-          filename,
-          mimeType: mimeByExt[ext] ?? "application/octet-stream",
-          audioUrl:
-            call.source_url && /^https?:\/\//i.test(call.source_url)
-              ? call.source_url
-              : undefined,
-        },
-        {
-          onJobSubmitted: async (jobId) => {
-            await TranscriptionModel.markTranscribing(row.id, jobId);
-          },
-        }
-      );
-
+      const result = await transcribeFromCall(call!, row.id);
       return persistPyaiSuccess(callId, row.id, result);
     } catch (error) {
       if (error instanceof PyaiPollTimeoutError) {

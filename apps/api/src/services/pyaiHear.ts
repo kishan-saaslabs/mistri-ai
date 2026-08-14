@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { env } from "../config/env.js";
 import type { TranscriptSegment } from "../types/transcript.js";
 
@@ -79,6 +78,11 @@ async function pyaiRequest(url: string, init: RequestInit): Promise<unknown> {
   const res = await fetch(url, init);
   const body = await readJson(res);
   if (!res.ok) {
+    if (res.status === 413) {
+      throw new Error(
+        "PyAI rejected the file as too large (413). Hear must fetch it via audio_url — set S3_PUBLIC_ENDPOINT or PYAI_FETCH_BASE_URL to a public https origin.",
+      );
+    }
     throw new Error(errorMessageFromBody(body, `PyAI request failed (${res.status})`));
   }
   return body;
@@ -143,9 +147,8 @@ type PyaiJob = {
 };
 
 async function submitJob(input: {
-  bytes?: Buffer;
+  blob?: Blob;
   filename?: string;
-  mimeType?: string;
   audioUrl?: string;
 }): Promise<PyaiJob> {
   const headers = new Headers(authHeaders());
@@ -162,18 +165,14 @@ async function submitJob(input: {
       numerals: true,
       output_formats: ["json"],
     });
-  } else if (input.bytes) {
+  } else if (input.blob) {
     const form = new FormData();
     form.set("model", env.PYAI_TRANSCRIBE_MODEL);
     form.set("diarize", "true");
     form.set("channel", "false");
     form.set("numerals", "true");
     form.set("output_formats", "json");
-    form.set(
-      "audio",
-      new Blob([new Uint8Array(input.bytes)], { type: input.mimeType ?? "application/octet-stream" }),
-      input.filename ?? "call.mp3",
-    );
+    form.set("audio", input.blob, input.filename ?? "call.mp3");
     body = form;
   } else {
     throw new Error("A recording file or audio URL is required");
@@ -253,24 +252,18 @@ export async function finishPyaiJob(jobId: string): Promise<PyaiTranscriptResult
 
 export async function transcribeAudioFile(
   input: {
-    absolutePath?: string;
     filename: string;
     mimeType: string;
     audioUrl?: string;
+    blob?: Blob;
   },
   hooks?: {
     onJobSubmitted?: (jobId: string) => Promise<void> | void;
   },
 ): Promise<PyaiTranscriptResult> {
-  let bytes: Buffer | undefined;
-  if (input.absolutePath) {
-    bytes = await readFile(input.absolutePath);
-  }
-
   const submitted = await submitJob({
-    bytes,
+    blob: input.blob,
     filename: input.filename,
-    mimeType: input.mimeType,
     audioUrl: input.audioUrl,
   });
 
