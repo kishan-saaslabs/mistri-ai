@@ -1,0 +1,93 @@
+{
+  "status": "SUCCESS",
+  "summary": [
+    {
+      "title": "Introduction and Context",
+      "text": "Cheryl introduced herself as part of the sales team and Joseph provided context about his company, Conteka, and their needs.",
+      "evidence": [
+        { "segmentId": "seg_7", "quote": "i'm part of the sales team here handling new acquisitions" },
+        { "segmentId": "seg_12", "quote": "we are conteka we are a data intelligence platform" }
+      ]
+    },
+    {
+      "title": "Current Solutions and Needs",
+      "text": "Joseph explained their current use of Google Meet and Zoom, and expressed interest in a unified business phone system.",
+      "evidence": [
+        { "segmentId": "seg_15", "quote": "currently down in terms of the calls we are using google meet" },
+        { "segmentId": "seg_23", "quote": "one hundred yep" }
+      ]
+    },
+    {
+      "title": "Integration Requirements",
+      "text": "Joseph mentioned the need for integration with SalesLoft and Pipedrive.",
+      "evidence": [
+        { "segmentId": "seg_38", "quote": "we use sales loft and our crm we use pipedrive" }
+      ]
+    },
+    {
+      "title": "Analytics and Coaching Features",
+      "text": "Joseph is interested in call monitoring, coaching, and analytics features.",
+      "evidence": [
+        { "segmentId": "seg_69", "quote": "it's monitoring our costs or do a bit of of coaching or analytics for our sales team" }
+      ]
+    },
+    {
+      "title": "Next Steps and Follow-up",
+      "text": "Cheryl will send a quote and video demos, and Joseph requested case studies.",
+      "evidence": [
+        { "segmentId": "seg_131", "quote": "i'm gonna work on getting you a quote for this" },
+        { "segmentId": "seg_136", "quote": "do you have case studies with dated like companies" }
+      ]
+    }
+  ],
+  "objections": [
+    {
+      "title": "Integration with SalesLoft",
+      "text": "Cheryl mentioned that there is no direct integration with SalesLoft, which may require additional development.",
+      "evidence": [
+        { "segmentId": "seg_42", "quote": "we do not have for sales loft so that is something that we need to build" }
+      ]
+    }
+  ],
+  "customer_wants": [
+    {
+      "label": "Unified business phone system",
+      "confidence": "high",
+      "evidence": [{ "segmentId": "seg_23", "quote": "one hundred yep" }]
+    },
+    {
+      "label": "Integration with SalesLoft and Pipedrive",
+      "confidence": "high",
+      "evidence": [{ "segmentId": "seg_38", "quote": "we use sales loft and our crm we use pipedrive" }]
+    },
+    {
+      "label": "Call monitoring and analytics",
+      "confidence": "high",
+      "evidence": [{ "segmentId": "seg_69", "quote": "it's monitoring our costs or do a bit of of coaching or analytics for our sales team" }]
+    }
+  ],
+  "next_steps": [
+    {
+      "text": "Cheryl will work on getting a quote for Joseph.",
+      "owner": "Cheryl",
+      "evidence": [{ "segmentId": "seg_131", "quote": "i'm gonna work on getting you a quote for this" }]
+    },
+    {
+      "text": "Cheryl will send video demos of the phone system and contact center.",
+      "owner": "Cheryl",
+      "evidence": [{ "segmentId": "seg_133", "quote": "i will send you in an email kind of a video on how our phone system looks like" }]
+    },
+    {
+      "text": "Cheryl will send a link to case studies relevant to Joseph's industry.",
+      "owner": "Cheryl",
+      "evidence": [{ "segmentId": "seg_137", "quote": "i'm gonna send the link over to you as" }]
+    }
+  ],
+  "follow_up_email": {
+    "subject": "Quote and Video Demos for Conteka",
+    "body": "Hi Joseph, \n\nThank you for the insightful conversation today. As discussed, I will be sending over a quote for the services we discussed, along with video demos of our phone system and contact center. Additionally, I'll include a link to case studies relevant to your industry. Please expect this email by the end of the day. \n\nBest, \nCheryl",
+    "confidence": "high",
+    "evidence": [{ "segmentId": "seg_139", "quote": "i'm gonna have everything wrapped up in an email please wait for that within the day" }]
+  },
+  "error": null
+}
