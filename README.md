@@ -17,32 +17,19 @@ Mistri AI records the shape of a deal from the call itself: transcript, deal hea
 git clone https://github.com/kishan-saaslabs/mistri-ai.git
 cd mistri-ai
 pnpm install
-cp .env.example .env
-```
-
-Set `POSTGRES_PASSWORD`, `JWT_SECRET` (32+ characters), and `PYAI_API_KEY` in `.env`.
-Set `LLM_API_KEY` too if you want speaker-name inference (`apps/ai`) to actually
-run — see [apps/ai/README.md](apps/ai/README.md).
-
-```bash
-# example — run locally, do not commit the output
-openssl rand -base64 48
-```
-
-Then:
-
-```bash
-pnpm db:up
-pnpm redis:up
-pnpm db:migrate
-pnpm db:seed
+pnpm bootstrap
 pnpm dev
 ```
+
+`pnpm bootstrap` copies `.env` if needed, fills empty local secrets (`JWT_SECRET`, Postgres, seed password), starts Postgres (pgvector) and Redis, waits until they are healthy, migrates, and seeds. (`pnpm setup` is a pnpm CLI command and will not run this.)
+
+Add `PYAI_API_KEY` and `LLM_API_KEY` in `.env` when you want live transcription and deal notes. Do not commit `.env`.
 
 - Frontend: http://localhost:5173
 - API health: http://localhost:3001/health
 - Swagger UI: http://localhost:3001/docs
 - OpenAPI JSON: http://localhost:3001/openapi.json
+- Demo login: `demo@mistri.ai` (password is `SEED_USER_PASSWORD` in `.env`)
 
 The UI ships with demo call data so you can explore Calls, Deals, and Ask Mistri without wiring a live transcription pipeline. Uploads and auth persist through the API once Postgres is running.
 
@@ -50,10 +37,12 @@ The UI ships with demo call data so you can explore Calls, Deals, and Ask Mistri
 
 | Command | What it does |
 | --- | --- |
+| `pnpm bootstrap` | Create `.env` if missing, start Postgres + Redis, migrate, seed |
 | `pnpm dev` | Run API and frontend together |
 | `pnpm dev:api` / `pnpm dev:frontend` | Run one app |
 | `pnpm build` | Typecheck and build both apps |
 | `pnpm typecheck` | Typecheck both apps |
+| `pnpm docker:up` | Start Postgres and Redis and wait until healthy |
 | `pnpm db:up` | Start Postgres via Docker Compose |
 | `pnpm redis:up` | Start Redis via Docker Compose (BullMQ job queue) |
 | `pnpm db:migrate` | Apply SQL schema |
