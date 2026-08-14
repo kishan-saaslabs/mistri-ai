@@ -65,9 +65,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await authApi.logout();
     } catch {
       // Best effort — clear the local session even if the call fails.
-    } finally {
-      queryClient.clear();
     }
+    await queryClient.cancelQueries();
+    queryClient.setQueryData(queryKeys.me, null);
+    queryClient.removeQueries({
+      predicate: (query) => query.queryKey[0] !== "auth",
+    });
   }, [queryClient]);
 
   const value = useMemo<AuthValue>(

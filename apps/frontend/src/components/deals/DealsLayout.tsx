@@ -145,17 +145,16 @@ function DealList({
         !onOverview && "max-md:hidden",
       )}
     >
-      <div className="shrink-0 border-b border-border px-3 pt-4 pb-3">
+      <div className="shrink-0 px-3 pt-4 pb-3">
         <div className="mb-2.5 flex items-center justify-between gap-2">
           <Link
             to="/deals"
-            className="text-[15px] font-semibold text-foreground hover:text-brand"
+            className="text-[15px] font-semibold text-foreground"
           >
             Deals
           </Link>
           <Button
             type="button"
-            variant="outline"
             size="sm"
             data-icon="inline-start"
             onClick={() => {
@@ -164,7 +163,7 @@ function DealList({
             }}
           >
             <Plus className="size-3.5" />
-            New deal
+            New
           </Button>
         </div>
         <div className="relative">
@@ -173,7 +172,7 @@ function DealList({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search deals…"
-            className="h-7 pl-8"
+            className="h-8 bg-muted/60 pl-8 dark:bg-input/40"
           />
         </div>
       </div>
@@ -214,20 +213,20 @@ function DealList({
         </DialogContent>
       </Dialog>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {loading ? (
           Array.from({ length: 6 }, (_, i) => (
-            <div key={i} className="border-b border-border px-3 py-2.5">
+            <div key={i} className="px-2.5 py-2">
               <div className="truncate text-[13px] font-medium">
                 <SkeletonLine className="w-[70%]" />
               </div>
-              <div className="mt-px font-mono text-[10.5px]">
+              <div className="mt-0.5 text-[11px]">
                 <SkeletonLine className="w-[42%]" />
               </div>
             </div>
           ))
         ) : visible.length === 0 ? (
-          <p className="px-3 py-6 text-center text-[12.5px] text-muted-foreground">
+          <p className="px-2 py-6 text-center text-[12.5px] text-muted-foreground">
             No deals match “{query}”.
           </p>
         ) : (
@@ -248,19 +247,19 @@ function DealList({
                   >
                     <NavLink
                       to={`/deals/${deal.id}`}
-                      className="relative block border-b border-border px-3 py-2.5 hover:bg-muted/50"
+                      className="relative block min-w-0 rounded-lg px-2.5 py-2 hover:bg-muted/50"
                     >
                       {selected ? (
                         <motion.span
                           layoutId="deal-list-pill"
-                          className="absolute inset-0 border-l-2 border-l-brand bg-brand-tint"
+                          className="absolute inset-0 rounded-lg bg-brand-tint"
                           transition={motionTransition(reduce, springs.pill)}
                         />
                       ) : null}
                       <div className="relative z-1 truncate text-[13px] font-medium">
                         {deal.name}
                       </div>
-                      <div className="relative z-1 mt-px font-mono text-[10.5px] text-muted-foreground">
+                      <div className="relative z-1 mt-0.5 text-[11px] text-muted-foreground">
                         {formatDate(deal.created_at)}
                       </div>
                     </NavLink>

@@ -145,10 +145,10 @@ export type CreateOrgUserInput = {
   role?: Role;
 };
 
-export type ChatScopeType = "call" | "deal";
+export type ChatScopeType = "call" | "deal" | "global";
 
 export type AskAttach = {
-  type: ChatScopeType;
+  type: Exclude<ChatScopeType, "global">;
   id: string;
   name: string;
 };
@@ -158,7 +158,7 @@ export type Conversation = {
   scope_type: ChatScopeType;
   scope_call_id: string | null;
   scope_deal_id: string | null;
-  title: string;
+  title: string | null;
   last_activity_at: string;
 };
 
@@ -201,15 +201,20 @@ export type CreateConversationResult = {
 
 export function conversationFromCreate(
   result: CreateConversationResult,
-  attach: AskAttach,
+  input: {
+    scopeType: ChatScopeType;
+    title: string | null;
+    attach?: AskAttach | null;
+  },
 ): Conversation {
   const at = new Date().toISOString();
+  const attach = input.attach;
   return {
     id: result.conversationId,
-    scope_type: attach.type,
-    scope_call_id: attach.type === "call" ? attach.id : null,
-    scope_deal_id: attach.type === "deal" ? attach.id : null,
-    title: attach.name,
+    scope_type: input.scopeType,
+    scope_call_id: attach?.type === "call" ? attach.id : null,
+    scope_deal_id: attach?.type === "deal" ? attach.id : null,
+    title: input.title,
     last_activity_at: at,
   };
 }
@@ -296,6 +301,7 @@ export const authApi = {
   logout: () =>
     request<null>("/auth/logout", {
       method: "POST",
+      body: "{}",
     }),
 
   me: () => request<{ user: AuthUser }>("/auth/me"),
@@ -398,6 +404,21 @@ export const callsApi = {
 };
 
 export const conversationsApi = {
+  list: (filters?: { callId?: string; dealId?: string }) =>
+    request<{ conversations: Conversation[] }>(
+      `/conversations${conversationQuery(filters)}`,
+    ).then((r) => r.conversations),
+
+  search: (q: string, filters?: { callId?: string; dealId?: string }) =>
+    request<{ conversations: Conversation[] }>(
+      `/conversations/search${conversationQuery({ ...filters, q })}`,
+    ).then((r) => r.conversations),
+
+  remove: (id: string) =>
+    request<null>(`/conversations/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+
   create: (input: {
     scopeType: ChatScopeType;
     callId?: string;
@@ -405,11 +426,7 @@ export const conversationsApi = {
   }) =>
     request<CreateConversationResult>("/conversations", {
       method: "POST",
-      body: JSON.stringify(
-        input.scopeType === "call"
-          ? { scopeType: "call", callId: input.callId }
-          : { scopeType: "deal", dealId: input.dealId },
-      ),
+      body: JSON.stringify(createConversationBody(input)),
     }),
 
   messages: (id: string) =>
@@ -420,9 +437,37 @@ export const conversationsApi = {
   send: (
     id: string,
     content: string,
-    onStage?: (stage: ChatStage) => void,
-  ) => postConversationMessage(id, content, onStage),
+    options?: {
+      onStage?: (stage: ChatStage) => void;
+      focusDealIds?: string[];
+      focusCallIds?: string[];
+    },
+  ) => postConversationMessage(id, content, options),
 };
+
+function conversationQuery(filters?: {
+  q?: string;
+  callId?: string;
+  dealId?: string;
+}) {
+  const params = new URLSearchParams();
+  if (filters?.q) params.set("q", filters.q);
+  if (filters?.callId) params.set("callId", filters.callId);
+  if (filters?.dealId) params.set("dealId", filters.dealId);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
+function createConversationBody(input: {
+  scopeType: ChatScopeType;
+  callId?: string;
+  dealId?: string;
+}) {
+  const body: Record<string, unknown> = { scopeType: input.scopeType };
+  if (input.scopeType === "call") body.callId = input.callId;
+  if (input.scopeType === "deal") body.dealId = input.dealId;
+  return body;
+}
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -430,11 +475,19 @@ const UUID_RE =
 async function postConversationMessage(
   id: string,
   content: string,
-  onStage?: (stage: ChatStage) => void,
+  options?: {
+    onStage?: (stage: ChatStage) => void;
+    focusDealIds?: string[];
+    focusCallIds?: string[];
+  },
 ) {
   if (!UUID_RE.test(id)) {
     throw new ApiError(400, "Conversation id is required.");
   }
+
+  const body: Record<string, unknown> = { content };
+  if (options?.focusDealIds?.length) body.focusDealIds = options.focusDealIds;
+  if (options?.focusCallIds?.length) body.focusCallIds = options.focusCallIds;
 
   let res: Response;
   try {
@@ -447,7 +500,7 @@ async function postConversationMessage(
           "Content-Type": "application/json",
           Accept: "text/event-stream",
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(body),
       },
     );
   } catch {
@@ -485,7 +538,7 @@ async function postConversationMessage(
         stage === "retrieving" ||
         stage === "generating"
       ) {
-        onStage?.(stage);
+        options?.onStage?.(stage);
       }
     } else if (event === "answer" && data && typeof data === "object" && "text" in data) {
       result.text = String((data as { text: unknown }).text ?? "");

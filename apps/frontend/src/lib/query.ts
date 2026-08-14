@@ -22,6 +22,8 @@ export const queryKeys = {
     ["calls", callId, "insights", transcriptionId] as const,
   calls: ["calls"] as const,
   conversations: (userId: string) => ["conversations", userId] as const,
+  conversationSearch: (userId: string, q: string) =>
+    ["conversations", userId, "search", q] as const,
   conversationMessages: (id: string) => ["conversations", id, "messages"] as const,
 };
 

@@ -53,10 +53,10 @@ function SidebarBody({
     setSigningOut(true);
     try {
       await logout();
-      void navigate("/login", { replace: true });
+      setConfirmOpen(false);
+      navigate("/login", { replace: true });
     } finally {
       setSigningOut(false);
-      setConfirmOpen(false);
     }
   }
 

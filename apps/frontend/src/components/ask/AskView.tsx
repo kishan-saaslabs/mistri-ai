@@ -26,7 +26,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { ASK_SUGGESTIONS, readAskChats, upsertAskChat } from "@/lib/ask";
+import { ASK_SUGGESTIONS, chatTitle } from "@/lib/ask";
 import {
   ApiError,
   callsApi,
@@ -63,17 +63,20 @@ export function AskView() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState("");
-  const [attach, setAttach] = useState<AskAttach | null>(null);
+  const [focusDeal, setFocusDeal] = useState<{ id: string; name: string } | null>(
+    null,
+  );
+  const [focusCall, setFocusCall] = useState<{ id: string; name: string } | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   const [localThread, setLocalThread] = useState<ChatMessage[] | null>(null);
   const [picker, setPicker] = useState<"deal" | "call" | null>(null);
   const [filter, setFilter] = useState("");
   const reduce = useReducedMotion();
-  const locked = Boolean(conversationId);
-
   const conversationsQuery = useQuery({
     queryKey: queryKeys.conversations(user?.id ?? ""),
-    queryFn: () => readAskChats(user!.id),
+    queryFn: () => conversationsApi.list(),
     enabled: Boolean(user?.id),
   });
   const messagesQuery = useQuery({
@@ -113,15 +116,8 @@ export function AskView() {
     [conversationsQuery.data, conversationId],
   );
 
-  const chip: AskAttach | null = locked
-    ? current
-      ? {
-          type: current.scope_type,
-          id: current.scope_deal_id ?? current.scope_call_id ?? current.id,
-          name: current.title.trim() || "Untitled chat",
-        }
-      : attach
-    : attach;
+  const lockedScope = current ? scopedAttach(current) : null;
+  const globalFocus = !lockedScope;
 
   const messages = conversationId
     ? (messagesQuery.data ?? [])
@@ -131,7 +127,13 @@ export function AskView() {
     const state = location.state as AskLocationState | null;
     if (!state?.prompt && !state?.attach) return;
     if (state.prompt?.trim()) setDraft(state.prompt.trim());
-    if (state.attach && !conversationId) setAttach(state.attach);
+    if (state.attach && !conversationId) {
+      if (state.attach.type === "deal") {
+        setFocusDeal({ id: state.attach.id, name: state.attach.name });
+      } else {
+        setFocusCall({ id: state.attach.id, name: state.attach.name });
+      }
+    }
     void navigate(location.pathname, { replace: true, state: null });
   }, [conversationId, location.pathname, location.state, navigate]);
 
@@ -153,9 +155,9 @@ export function AskView() {
 
   function rememberConversation(row: Conversation) {
     if (!user) return;
-    queryClient.setQueryData(
+    queryClient.setQueryData<Conversation[]>(
       queryKeys.conversations(user.id),
-      upsertAskChat(user.id, row),
+      (prev) => [row, ...(prev ?? []).filter((c) => c.id !== row.id)],
     );
   }
 
@@ -163,10 +165,6 @@ export function AskView() {
     event?.preventDefault();
     const value = draft.trim();
     if (!value || busy) return;
-    if (!chip) {
-      toast.error("Attach a deal or call to ask.");
-      return;
-    }
     setBusy(true);
     setDraft("");
     const userMsg = localMessage("user", value);
@@ -182,20 +180,29 @@ export function AskView() {
     let createdId = conversationId ?? null;
     try {
       if (!createdId) {
-        const created = await conversationsApi.create(
-          chip.type === "call"
-            ? { scopeType: "call", callId: chip.id }
-            : { scopeType: "deal", dealId: chip.id },
-        );
+        const title = (
+          focusDeal?.name ??
+          focusCall?.name ??
+          value
+        ).slice(0, 200);
+        const created = await conversationsApi.create({ scopeType: "global" });
         createdId = created.conversationId;
         if (!createdId) {
           throw new ApiError(500, "Conversation id is missing.");
         }
-        rememberConversation(conversationFromCreate(created, chip));
+        rememberConversation(
+          conversationFromCreate(created, { scopeType: "global", title }),
+        );
       } else if (current) {
-        rememberConversation(current);
+        rememberConversation({
+          ...current,
+          last_activity_at: new Date().toISOString(),
+        });
       }
-      const result = await conversationsApi.send(createdId, value);
+      const result = await conversationsApi.send(createdId, value, {
+        focusDealIds: globalFocus && focusDeal ? [focusDeal.id] : undefined,
+        focusCallIds: globalFocus && focusCall ? [focusCall.id] : undefined,
+      });
       const assistant: ChatMessage = {
         id: result.messageId ?? crypto.randomUUID(),
         conversation_id: createdId,
@@ -209,6 +216,11 @@ export function AskView() {
         queryKeys.conversationMessages(createdId),
         (prev) => [...(prev ?? [userMsg]), assistant],
       );
+      if (user) {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.conversations(user.id),
+        });
+      }
       if (!conversationId) {
         void navigate(`/ask/${createdId}`, { replace: true });
       }
@@ -267,8 +279,8 @@ export function AskView() {
               </div>
               <h2 className="mb-1.5 text-[17px] font-semibold">Ask Mistri</h2>
               <p className="mb-[22px] text-[13px] text-muted-foreground">
-                Attach a deal or call, then ask about objections, next steps, or
-                what the customer wants.
+                Ask about objections, next steps, or what the customer wants.
+                Attach a deal or call to focus a question.
               </p>
               <div className="flex flex-wrap justify-center gap-2">
                 {ASK_SUGGESTIONS.map((item) => (
@@ -350,27 +362,26 @@ export function AskView() {
         className="w-full max-w-[720px] px-6 pt-3 pb-4"
       >
         <div className="rounded-xl border border-border bg-background shadow-sm focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
-          {chip ? (
-            <div className="flex flex-wrap gap-1.5 px-3.5 pt-2.5">
-              <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-1 text-[12px]">
-                {chip.type === "deal" ? (
-                  <Handshake className="size-3" />
-                ) : (
-                  <Phone className="size-3" />
-                )}
-                <span className="max-w-[220px] truncate">{chip.name}</span>
-                {locked ? null : (
-                  <button
-                    type="button"
-                    className="text-muted-foreground hover:text-foreground"
-                    aria-label="Remove attachment"
-                    onClick={() => setAttach(null)}
-                  >
-                    <X className="size-3" />
-                  </button>
-                )}
-              </span>
-            </div>
+          {lockedScope ? (
+            <FocusChips
+              items={[lockedScope]}
+              onRemove={null}
+            />
+          ) : focusDeal || focusCall ? (
+            <FocusChips
+              items={[
+                ...(focusDeal
+                  ? [{ type: "deal" as const, id: focusDeal.id, name: focusDeal.name }]
+                  : []),
+                ...(focusCall
+                  ? [{ type: "call" as const, id: focusCall.id, name: focusCall.name }]
+                  : []),
+              ]}
+              onRemove={(item) => {
+                if (item.type === "deal") setFocusDeal(null);
+                else setFocusCall(null);
+              }}
+            />
           ) : null}
           <textarea
             ref={inputRef}
@@ -390,7 +401,7 @@ export function AskView() {
                   setPicker(open ? "deal" : null);
                   if (!open) setFilter("");
                 }}
-                disabled={locked}
+                disabled={Boolean(lockedScope)}
                 icon={Handshake}
                 label="Attach deal"
                 placeholder="Search deals…"
@@ -406,9 +417,7 @@ export function AskView() {
                   id: deal.id,
                   name: deal.name,
                 }))}
-                onPick={(item) =>
-                  setAttach({ type: "deal", id: item.id, name: item.name })
-                }
+                onPick={(item) => setFocusDeal({ id: item.id, name: item.name })}
               />
               <AttachMenu
                 open={picker === "call"}
@@ -416,7 +425,7 @@ export function AskView() {
                   setPicker(open ? "call" : null);
                   if (!open) setFilter("");
                 }}
-                disabled={locked}
+                disabled={Boolean(lockedScope)}
                 icon={Phone}
                 label="Attach call"
                 placeholder="Search calls…"
@@ -432,9 +441,7 @@ export function AskView() {
                   id: call.id,
                   name: call.label,
                 }))}
-                onPick={(item) =>
-                  setAttach({ type: "call", id: item.id, name: item.name })
-                }
+                onPick={(item) => setFocusCall({ id: item.id, name: item.name })}
               />
             </div>
             <Button
@@ -449,6 +456,42 @@ export function AskView() {
           </div>
         </div>
       </form>
+    </div>
+  );
+}
+
+function FocusChips({
+  items,
+  onRemove,
+}: {
+  items: AskAttach[];
+  onRemove: ((item: AskAttach) => void) | null;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5 px-3.5 pt-2.5">
+      {items.map((item) => (
+        <span
+          key={`${item.type}-${item.id}`}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-1 text-[12px]"
+        >
+          {item.type === "deal" ? (
+            <Handshake className="size-3" />
+          ) : (
+            <Phone className="size-3" />
+          )}
+          <span className="max-w-[220px] truncate">{item.name}</span>
+          {onRemove ? (
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground"
+              aria-label={`Remove ${item.type}`}
+              onClick={() => onRemove(item)}
+            >
+              <X className="size-3" />
+            </button>
+          ) : null}
+        </span>
+      ))}
     </div>
   );
 }
@@ -524,6 +567,16 @@ function AttachMenu({
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+function scopedAttach(row: Conversation): AskAttach | null {
+  if (row.scope_type === "deal" && row.scope_deal_id) {
+    return { type: "deal", id: row.scope_deal_id, name: chatTitle(row.title) };
+  }
+  if (row.scope_type === "call" && row.scope_call_id) {
+    return { type: "call", id: row.scope_call_id, name: chatTitle(row.title) };
+  }
+  return null;
 }
 
 function localMessage(

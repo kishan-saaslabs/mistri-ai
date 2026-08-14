@@ -1,4 +1,3 @@
-import type { Conversation } from "@/lib/api";
 import type { AskMessage, CallRecord, Deal, Rep } from "@/types/domain";
 
 export const ASK_SUGGESTIONS = [
@@ -8,31 +7,8 @@ export const ASK_SUGGESTIONS = [
   "What does the customer want from us?",
 ];
 
-function chatsKey(userId: string) {
-  return `mistri.ask.chats.${userId}`;
-}
-
-export function readAskChats(userId: string): Conversation[] {
-  try {
-    const raw = localStorage.getItem(chatsKey(userId));
-    const parsed = raw ? (JSON.parse(raw) as Conversation[]) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-export function writeAskChats(userId: string, chats: Conversation[]) {
-  localStorage.setItem(chatsKey(userId), JSON.stringify(chats));
-}
-
-export function upsertAskChat(userId: string, chat: Conversation) {
-  const next = [
-    { ...chat, last_activity_at: new Date().toISOString() },
-    ...readAskChats(userId).filter((c) => c.id !== chat.id),
-  ];
-  writeAskChats(userId, next);
-  return next;
+export function chatTitle(title: string | null | undefined) {
+  return title?.trim() || "Untitled chat";
 }
 
 export function answerAskQuestion(
