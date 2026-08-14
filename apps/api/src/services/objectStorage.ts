@@ -160,7 +160,7 @@ export async function ensureObjectStorage(): Promise<void> {
       }
       if (!pyaiCanFetchUrl(`${providerEndpoint()}/health`) && !pyaiCanFetchUrl(`${env.PYAI_FETCH_BASE_URL ?? ""}/`)) {
         console.warn(
-          "PyAI cannot fetch local MinIO. For large recordings set S3_PUBLIC_ENDPOINT or PYAI_FETCH_BASE_URL to a public https origin.",
+          "PyAI cannot fetch local MinIO. Large recordings need S3_PUBLIC_ENDPOINT as a public https origin.",
         );
       }
       return;

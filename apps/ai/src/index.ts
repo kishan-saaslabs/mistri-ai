@@ -46,3 +46,5 @@ export { generateChatAnswer } from "./chat/generate.js";
 export type { ChatGenerationInput, EvidenceBlock } from "./chat/generate.js";
 export { validateCitations } from "./chat/validateCitations.js";
 export type { ShownContext, ValidationResult } from "./chat/validateCitations.js";
+export { generateDealSynthesisAnswer, validateDealCitations } from "./chat/dealSynthesis.js";
+export type { DealBlock, DealCitation, DealSynthesisAnswer, DealSynthesisInput } from "./chat/dealSynthesis.js";

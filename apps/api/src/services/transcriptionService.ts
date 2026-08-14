@@ -25,6 +25,7 @@ import { publishKbIngestJob } from "../queue/kbIngestQueue.js";
 import {
   transcribeAudioFile,
   finishPyaiJob,
+  checkPyaiJob,
   PyaiPollTimeoutError,
 } from "./pyaiHear.js";
 import {
@@ -125,6 +126,22 @@ async function failPyai(
   await CallModel.updateStatus(callId, "PYAI_FAILED");
 }
 
+async function applyPyaiCheck(
+  callId: string,
+  transcriptionId: string,
+  jobId: string,
+) {
+  const checked = await checkPyaiJob(jobId);
+  if (checked.state === "completed") {
+    return persistPyaiSuccess(callId, transcriptionId, checked.result);
+  }
+  if (checked.state === "failed") {
+    await failPyai(callId, transcriptionId, new Error(checked.error));
+    return null;
+  }
+  return null;
+}
+
 async function pollExistingPyaiJob(
   callId: string,
   transcriptionId: string,
@@ -135,6 +152,8 @@ async function pollExistingPyaiJob(
     return await persistPyaiSuccess(callId, transcriptionId, result);
   } catch (error) {
     if (error instanceof PyaiPollTimeoutError) {
+      const synced = await applyPyaiCheck(callId, transcriptionId, jobId);
+      if (synced) return synced;
       console.error(
         "PyAI job still running; leaving transcription in PYAI_TRANSCRIBING"
       );
@@ -166,7 +185,7 @@ function pyaiFetchBase(): string | undefined {
 }
 
 const LARGE_FETCH_HINT =
-  "PyAI cannot fetch local MinIO and this recording is too large to upload (413). Set S3_PUBLIC_ENDPOINT (tunnel to MinIO) or PYAI_FETCH_BASE_URL (https tunnel to this API).";
+  "PyAI cannot fetch local MinIO and this recording is too large to upload (413). Set S3_PUBLIC_ENDPOINT to a public https bucket origin.";
 
 async function transcribeFromCall(
   call: {
@@ -277,6 +296,23 @@ export const TranscriptionService = {
           console.error("Resumed transcription failed:", message);
         }
       );
+    }
+  },
+
+  async syncInFlightForCall(callId: string) {
+    const rows = await TranscriptionModel.listByCallId(callId);
+    for (const row of rows) {
+      if (!row.provider_job_id) continue;
+      if (row.status !== "PROCESSING" && row.status !== "PYAI_TRANSCRIBING") {
+        continue;
+      }
+      try {
+        await applyPyaiCheck(row.call_id, row.id, row.provider_job_id);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Transcription sync failed";
+        console.error("Could not sync Hear job:", message);
+      }
     }
   },
 

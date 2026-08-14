@@ -23,6 +23,25 @@ test("a long, self-contained follow-up with no dependence signal skips the rewri
   assert.equal(result.isFollowup, false);
 });
 
+test("a short topic-name query with no dependence signal skips the rewrite regardless of word count", async () => {
+  // Confirmed live: a word-count gate ("skip rewrite only if > N words") was
+  // tried twice (>6, then >3) and broke both times on short, fully
+  // self-contained messages — "Can you summarize this call?" and "About
+  // Land CCK" were both force-routed into a rewrite purely for being brief,
+  // and the rewrite hijacked them using unrelated prior history. Length is
+  // not the signal; the presence of a dependence marker is — this message
+  // has none, so it must pass through untouched no matter how short it is.
+  const client = new MockClient("should not be used");
+  const history = [
+    { role: "user" as const, content: "What calls do I have access to?" },
+    { role: "assistant" as const, content: "You have access to several calls." },
+  ];
+  const result = await contextualizeQuery(history, "About Land CCK", client);
+  assert.equal(client.calls.length, 0, "must not call the rewrite model at all");
+  assert.equal(result.standaloneQuery, "About Land CCK");
+  assert.equal(result.isFollowup, false);
+});
+
 test("'this call'/'that deal' are scope self-references, not dependence signals — no rewrite even with prior history", async () => {
   // Confirmed live: without this exclusion, "this" in "this call" was
   // flagged as needing history to resolve, and the rewrite model then
