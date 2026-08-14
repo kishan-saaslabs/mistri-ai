@@ -18,6 +18,11 @@ export const queryKeys = {
   dealMembers: (dealId: string) => ["deals", dealId, "members"] as const,
   users: ["users"] as const,
   call: (id: string) => ["calls", id] as const,
+  callInsights: (callId: string, transcriptionId: string) =>
+    ["calls", callId, "insights", transcriptionId] as const,
+  calls: ["calls"] as const,
+  conversations: (userId: string) => ["conversations", userId] as const,
+  conversationMessages: (id: string) => ["conversations", id, "messages"] as const,
 };
 
 export function queryErrorMessage(err: unknown) {

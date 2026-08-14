@@ -8,15 +8,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Handshake, Menu, Search, Sparkles } from "lucide-react";
+import { Menu, Search, Sparkles } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { SkeletonLine } from "@/components/ui/skeleton";
-import { dealsApi, type Deal } from "@/lib/api";
-import { formatDate } from "@/lib/display";
+import { ASK_SUGGESTIONS } from "@/lib/ask";
 import { motionTransition, springs } from "@/lib/motion";
-import { queryKeys } from "@/lib/query";
 import { cn } from "@/lib/utils";
 
 export function AskBar({
@@ -38,18 +34,16 @@ export function AskBar({
   const [panelTop, setPanelTop] = useState(72);
   const reduce = useReducedMotion();
 
-  const dealsQuery = useQuery({
-    queryKey: queryKeys.deals,
-    queryFn: dealsApi.list,
-    enabled: open,
-  });
-  const deals = dealsQuery.data ?? [];
-
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return deals;
-    return deals.filter((deal) => deal.name.toLowerCase().includes(q));
-  }, [deals, query]);
+  const items = useMemo(() => {
+    const q = query.trim();
+    const filtered = ASK_SUGGESTIONS.filter((item) =>
+      item.toLowerCase().includes(q.toLowerCase()),
+    );
+    if (q && !ASK_SUGGESTIONS.some((item) => item.toLowerCase() === q.toLowerCase())) {
+      return [q, ...filtered];
+    }
+    return filtered.length ? filtered : ASK_SUGGESTIONS;
+  }, [query]);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -63,26 +57,15 @@ export function AskBar({
     setOpen(true);
   }, []);
 
-  const goToDeal = useCallback(
-    (deal: Deal) => {
-      close();
-      void navigate(`/deals/${deal.id}`);
-    },
-    [close, navigate],
-  );
-
   const goToAsk = useCallback(
     (text: string) => {
       const prompt = text.trim();
       if (!prompt) return;
       close();
-      void navigate("/ask", { state: { prompt } });
+      void navigate("/ask/new", { state: { prompt } });
     },
     [close, navigate],
   );
-
-  const askFallback =
-    query.trim() && visible.length === 0 ? query.trim() : null;
 
   useEffect(() => {
     setModKey(/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl");
@@ -105,29 +88,29 @@ export function AskBar({
 
   useEffect(() => {
     setActiveIndex(0);
-  }, [query, deals]);
+  }, [query]);
 
   useEffect(() => {
     itemRefs.current[activeIndex]?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex, visible]);
+  }, [activeIndex, items]);
 
   function onOverlayKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      if (visible.length === 0) return;
-      setActiveIndex((i) => (i + 1) % visible.length);
+      if (items.length === 0) return;
+      setActiveIndex((i) => (i + 1) % items.length);
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      if (visible.length === 0) return;
-      setActiveIndex((i) => (i - 1 + visible.length) % visible.length);
+      if (items.length === 0) return;
+      setActiveIndex((i) => (i - 1 + items.length) % items.length);
     } else if (event.key === "Escape") {
       event.preventDefault();
       close();
     }
   }
 
-  const listId = "command-deal-list";
-  const activeDeal = visible[activeIndex];
+  const listId = "command-ask-list";
+  const activeItem = items[activeIndex];
 
   return (
     <div
@@ -208,9 +191,7 @@ export function AskBar({
                   <form
                     onSubmit={(event) => {
                       event.preventDefault();
-                      if (dealsQuery.isPending && deals.length === 0) return;
-                      if (activeDeal) goToDeal(activeDeal);
-                      else goToAsk(query);
+                      if (activeItem) goToAsk(activeItem);
                     }}
                     className="relative border-b border-border"
                   >
@@ -225,103 +206,55 @@ export function AskBar({
                       aria-expanded
                       aria-controls={listId}
                       aria-activedescendant={
-                        activeDeal
-                          ? `command-deal-${activeDeal.id}`
-                          : askFallback
-                            ? "command-ask"
-                            : undefined
+                        activeItem ? `command-ask-${activeIndex}` : undefined
                       }
                       aria-autocomplete="list"
                       className="h-12 w-full bg-transparent pr-4 pl-11 text-[15px] outline-none placeholder:text-muted-foreground"
                     />
                   </form>
                   <div className="px-2 pt-2 pb-1 text-[11px] font-medium text-muted-foreground">
-                    {askFallback ? "Ask Mistri" : "Deals"}
+                    Suggested
                   </div>
                   <div
                     id={listId}
                     role="listbox"
-                    aria-label={askFallback ? "Ask Mistri" : "Deals"}
+                    aria-label="Suggested questions"
                     className="max-h-[min(420px,50vh)] overflow-y-auto p-1.5 pt-0"
                   >
-                    {dealsQuery.isPending && deals.length === 0 ? (
-                      Array.from({ length: 5 }, (_, i) => (
-                        <div
-                          key={i}
-                          className="flex items-center gap-2.5 rounded-lg px-2.5 py-2"
+                    {items.map((item, index) => {
+                      const selected = index === activeIndex;
+                      const custom = Boolean(query.trim()) && index === 0 && item === query.trim();
+                      return (
+                        <button
+                          key={item}
+                          id={`command-ask-${index}`}
+                          ref={(node) => {
+                            itemRefs.current[index] = node;
+                          }}
+                          type="button"
+                          role="option"
+                          aria-selected={selected}
+                          className={cn(
+                            "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left",
+                            selected
+                              ? "bg-muted text-foreground"
+                              : "text-ink-soft hover:bg-muted/60 hover:text-foreground",
+                          )}
+                          onMouseEnter={() => setActiveIndex(index)}
+                          onClick={() => goToAsk(item)}
                         >
-                          <SkeletonLine className="size-4 shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <div className="text-[13px]">
-                              <SkeletonLine className="w-[55%]" />
-                            </div>
-                            <div className="font-mono text-[10.5px]">
-                              <SkeletonLine className="w-[32%]" />
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    ) : askFallback ? (
-                      <button
-                        id="command-ask"
-                        ref={(node) => {
-                          itemRefs.current[0] = node;
-                        }}
-                        type="button"
-                        role="option"
-                        aria-selected
-                        className="flex w-full items-center gap-2.5 rounded-lg bg-muted px-2.5 py-2 text-left text-foreground"
-                        onClick={() => goToAsk(askFallback)}
-                      >
-                        <Sparkles className="size-3.5 shrink-0 opacity-85" />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[13px] font-medium">
-                            {askFallback}
-                          </span>
-                          <span className="block text-[10.5px] text-muted-foreground">
-                            Open in Ask Mistri
-                          </span>
-                        </span>
-                      </button>
-                    ) : visible.length === 0 ? (
-                      <p className="px-2.5 py-6 text-center text-[12.5px] text-muted-foreground">
-                        No deals yet.
-                      </p>
-                    ) : (
-                      visible.map((deal, index) => {
-                        const selected = index === activeIndex;
-                        return (
-                          <button
-                            key={deal.id}
-                            id={`command-deal-${deal.id}`}
-                            ref={(node) => {
-                              itemRefs.current[index] = node;
-                            }}
-                            type="button"
-                            role="option"
-                            aria-selected={selected}
-                            className={cn(
-                              "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left",
-                              selected
-                                ? "bg-muted text-foreground"
-                                : "text-ink-soft hover:bg-muted/60 hover:text-foreground",
-                            )}
-                            onMouseEnter={() => setActiveIndex(index)}
-                            onClick={() => goToDeal(deal)}
-                          >
-                            <Handshake className="size-3.5 shrink-0 opacity-85" />
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[13px] font-medium">
-                                {deal.name}
-                              </span>
-                              <span className="block font-mono text-[10.5px] text-muted-foreground">
-                                {formatDate(deal.created_at)}
-                              </span>
+                          <Sparkles className="size-3.5 shrink-0 opacity-85" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[13px] font-medium">
+                              {item}
                             </span>
-                          </button>
-                        );
-                      })
-                    )}
+                            <span className="block text-[10.5px] text-muted-foreground">
+                              {custom ? "Open in Ask Mistri" : "Suggested question"}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </motion.div>
               ) : null}

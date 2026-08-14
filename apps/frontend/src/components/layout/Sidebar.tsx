@@ -97,7 +97,9 @@ function SidebarBody({
                   ? pathname === "/deals" ||
                     pathname.startsWith("/deals/") ||
                     pathname.startsWith("/calls/")
-                  : isActive;
+                  : item.to === "/ask"
+                    ? pathname === "/ask" || pathname.startsWith("/ask/")
+                    : isActive;
               return cn(
                 "relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] text-ink-soft",
                 active && "font-semibold text-foreground",
@@ -111,7 +113,9 @@ function SidebarBody({
                   ? pathname === "/deals" ||
                     pathname.startsWith("/deals/") ||
                     pathname.startsWith("/calls/")
-                  : isActive;
+                  : item.to === "/ask"
+                    ? pathname === "/ask" || pathname.startsWith("/ask/")
+                    : isActive;
               return (
                 <>
                   {active ? (

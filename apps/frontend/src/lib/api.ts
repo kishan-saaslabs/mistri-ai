@@ -103,12 +103,116 @@ export type CallDetail = {
   transcriptions: Transcription[];
 };
 
+export type InsightEvidence = {
+  segmentId: string;
+  quote: string;
+};
+
+export type CallInsightStatus = "PROCESSING" | "SUCCESS" | "FAILED";
+
+export type CallInsight = {
+  id: string;
+  call_id: string;
+  transcription_id: string;
+  status: CallInsightStatus;
+  summary: { title: string; text: string; evidence: InsightEvidence[] }[];
+  objections: { title: string; text: string; evidence: InsightEvidence[] }[];
+  customer_wants: {
+    label: string;
+    confidence: "high" | "medium" | "low";
+    evidence: InsightEvidence[];
+  }[];
+  next_steps: {
+    text: string;
+    owner: string;
+    evidence: InsightEvidence[];
+  }[];
+  follow_up_email: {
+    subject: string;
+    body: string;
+    confidence: "high" | "medium" | "low";
+    evidence: InsightEvidence[];
+  } | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type CreateOrgUserInput = {
   email: string;
   password: string;
   name: string;
   role?: Role;
 };
+
+export type ChatScopeType = "call" | "deal";
+
+export type AskAttach = {
+  type: ChatScopeType;
+  id: string;
+  name: string;
+};
+
+export type Conversation = {
+  id: string;
+  scope_type: ChatScopeType;
+  scope_call_id: string | null;
+  scope_deal_id: string | null;
+  title: string;
+  last_activity_at: string;
+};
+
+export type ChatCitation = {
+  segmentId: string;
+  chunkId: string;
+  quote: string;
+};
+
+export type ChatStage = "authorizing" | "retrieving" | "generating";
+
+export type ChatNotice = {
+  kind: string;
+  text: string;
+};
+
+export type ChatTurnResult = {
+  text: string;
+  citations: ChatCitation[];
+  notice: ChatNotice | null;
+  messageId: string | null;
+};
+
+export type ChatMessage = {
+  id: string;
+  conversation_id: string;
+  role: "user" | "assistant";
+  content: string;
+  citations: ChatCitation[];
+  notice?: ChatNotice | null;
+  created_at: string;
+};
+
+/** POST /api/conversations — CreateConversationResponse in Swagger */
+export type CreateConversationResult = {
+  conversationId: string;
+  effectiveTranscriptCount: number;
+  scopeDescription: string;
+};
+
+export function conversationFromCreate(
+  result: CreateConversationResult,
+  attach: AskAttach,
+): Conversation {
+  const at = new Date().toISOString();
+  return {
+    id: result.conversationId,
+    scope_type: attach.type,
+    scope_call_id: attach.type === "call" ? attach.id : null,
+    scope_deal_id: attach.type === "deal" ? attach.id : null,
+    title: attach.name,
+    last_activity_at: at,
+  };
+}
 
 /**
  * Base path for the API. Requests go through Vite's dev proxy (`/api` ->
@@ -234,7 +338,15 @@ export const usersApi = {
 };
 
 export const callsApi = {
+  list: () =>
+    request<{ calls: Call[] }>("/calls").then((r) => r.calls),
+
   get: (id: string) => request<CallDetail>(`/calls/${id}`),
+
+  insights: (id: string) =>
+    request<{ insights: CallInsight | null }>(`/calls/${id}/insights`).then(
+      (r) => r.insights,
+    ),
 
   audioUrl: (id: string) => `/api/calls/${id}/audio`,
 
@@ -254,3 +366,175 @@ export const callsApi = {
       body: JSON.stringify(input),
     }).then((r) => r.call),
 };
+
+export const conversationsApi = {
+  create: (input: {
+    scopeType: ChatScopeType;
+    callId?: string;
+    dealId?: string;
+  }) =>
+    request<CreateConversationResult>("/conversations", {
+      method: "POST",
+      body: JSON.stringify(
+        input.scopeType === "call"
+          ? { scopeType: "call", callId: input.callId }
+          : { scopeType: "deal", dealId: input.dealId },
+      ),
+    }),
+
+  messages: (id: string) =>
+    request<{ messages: ChatMessage[] }>(
+      `/conversations/${encodeURIComponent(id)}/messages`,
+    ).then((r) => r.messages),
+
+  send: (
+    id: string,
+    content: string,
+    onStage?: (stage: ChatStage) => void,
+  ) => postConversationMessage(id, content, onStage),
+};
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function postConversationMessage(
+  id: string,
+  content: string,
+  onStage?: (stage: ChatStage) => void,
+) {
+  if (!UUID_RE.test(id)) {
+    throw new ApiError(400, "Conversation id is required.");
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(
+      `${API_BASE}/api/conversations/${encodeURIComponent(id)}/messages`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        },
+        body: JSON.stringify({ content }),
+      },
+    );
+  } catch {
+    throw new ApiError(0, "Network error — is the API running?");
+  }
+
+  const contentType = res.headers.get("content-type") ?? "";
+  const isSse = contentType.includes("text/event-stream");
+  if (!isSse) {
+    const payload = contentType.includes("application/json")
+      ? await res.json().catch(() => null)
+      : null;
+    throw new ApiError(
+      res.status || 0,
+      (payload && (payload.error || payload.message)) ||
+        defaultErrorMessage(res.status),
+    );
+  }
+
+  const result: ChatTurnResult & {
+    error: { status: number; message: string } | null;
+  } = {
+    text: "",
+    citations: [],
+    notice: null,
+    messageId: null,
+    error: null,
+  };
+
+  await readSse(res, (event, data) => {
+    if (event === "stage" && data && typeof data === "object" && "stage" in data) {
+      const stage = String((data as { stage: unknown }).stage);
+      if (
+        stage === "authorizing" ||
+        stage === "retrieving" ||
+        stage === "generating"
+      ) {
+        onStage?.(stage);
+      }
+    } else if (event === "answer" && data && typeof data === "object" && "text" in data) {
+      result.text = String((data as { text: unknown }).text ?? "");
+    } else if (event === "citation" && data && typeof data === "object") {
+      const c = data as ChatCitation;
+      if (c.segmentId && c.quote) result.citations.push(c);
+    } else if (event === "notice" && data && typeof data === "object") {
+      const n = data as { kind?: unknown; text?: unknown };
+      result.notice = {
+        kind: typeof n.kind === "string" ? n.kind : "notice",
+        text: typeof n.text === "string" ? n.text : "",
+      };
+    } else if (event === "done" && data && typeof data === "object") {
+      const id = (data as { messageId?: unknown }).messageId;
+      result.messageId = typeof id === "string" ? id : null;
+    } else if (event === "error" && data && typeof data === "object") {
+      const err = data as { status?: unknown; message?: unknown };
+      result.error = {
+        status: typeof err.status === "number" ? err.status : 500,
+        message:
+          typeof err.message === "string"
+            ? err.message
+            : "Chat generation failed",
+      };
+    }
+    return event === "done" || event === "error";
+  });
+
+  if (result.error) {
+    throw new ApiError(result.error.status, result.error.message);
+  }
+  return {
+    text: result.text,
+    citations: result.citations,
+    notice: result.notice,
+    messageId: result.messageId,
+  };
+}
+
+function parseSseBlock(
+  block: string,
+  onEvent: (event: string, data: unknown) => boolean | void,
+) {
+  let event = "message";
+  let payload = "";
+  for (const line of block.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) payload += line.slice(5).trim();
+  }
+  if (!payload) return false;
+  try {
+    return onEvent(event, JSON.parse(payload) as unknown) === true;
+  } catch {
+    return onEvent(event, payload) === true;
+  }
+}
+
+async function readSse(
+  res: Response,
+  onEvent: (event: string, data: unknown) => boolean | void,
+) {
+  const reader = res.body?.getReader();
+  if (!reader) throw new ApiError(0, "Empty chat response");
+  const decoder = new TextDecoder();
+  let buf = "";
+  const finish = () => reader.cancel().catch(() => undefined);
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const blocks = buf.split("\n\n");
+    buf = blocks.pop() ?? "";
+    for (const block of blocks) {
+      if (parseSseBlock(block, onEvent)) {
+        void finish();
+        return;
+      }
+    }
+  }
+  buf += decoder.decode();
+  if (buf.trim()) parseSseBlock(buf, onEvent);
+}
