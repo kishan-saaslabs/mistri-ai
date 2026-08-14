@@ -99,4 +99,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [Code of Conduct](CODE_O
 
 ## License
 
-[MIT](LICENSE) © 2026 Kishan Kumar
+[MIT](LICENSE) © 2026 Mistri AI
