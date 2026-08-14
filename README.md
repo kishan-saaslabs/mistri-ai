@@ -2,7 +2,7 @@
 
 Open-source conversation intelligence for sales teams — an MIT-licensed alternative to Gong.
 
-![Deals view](<img width="3024" height="1964" alt="Screenshot 2026-08-14 at 4 18 44 PM (1)" src="https://github.com/user-attachments/assets/c6369c67-ab68-46af-b20d-435b2aac9040" />)  
+![Deals view](docs/screenshots/deals-view.png)
 
 Mistri AI records the shape of a deal from the call itself: transcript, deal health, buying signals, risks, and next steps. This repository is a pnpm workspace with two apps:
 
