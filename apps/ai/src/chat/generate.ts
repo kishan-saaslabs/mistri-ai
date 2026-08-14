@@ -16,6 +16,15 @@ export type ChatGenerationInput = {
 
 function buildChatPrompt(input: ChatGenerationInput): ChatMessage[] {
   const system = [
+    "First check: is the Question actually asking about the calls/deals data at all, or is it a greeting,",
+    "thanks, goodbye, or other small talk that isn't a data question (\"hi\", \"thanks!\", \"good morning\",",
+    "\"how are you\", etc.)? Judge this yourself from what the message means, not from matching it against",
+    "any fixed list of words — the same courtesy said differently is still just small talk. For that case,",
+    "reply briefly and naturally like a normal assistant would (e.g. a greeting back, plus what you can help",
+    "with), with an empty citations array — do NOT say \"the evidence doesn't cover that\" or anything implying",
+    "you looked for evidence and failed to find it, since you were never supposed to look for evidence there.",
+    "Only apply everything below to an actual question about the calls/deals data.",
+    "",
     "You answer a question about one or more sales/support calls using ONLY the evidence provided below.",
     "Every factual claim MUST cite at least one evidence block by its chunkId, with a short quote copied",
     "VERBATIM from that exact block's text — same wording, don't paraphrase, don't splice text from two",
@@ -48,6 +57,11 @@ function buildChatPrompt(input: ChatGenerationInput): ChatMessage[] {
     "",
     "Reserve \"the evidence doesn't cover that\" ONLY for when the question's subject is neither mentioned",
     "anywhere in the evidence NOR the name of the scope itself.",
+    "",
+    "The \"answer\" text is for a human to read — it must NEVER contain a chunkId, segmentId, or any other",
+    "internal identifier (the [chunkId=...] labels below are bookkeeping for you, not something to repeat).",
+    "Refer to things by their real name only (the deal/call name, the customer's name, what was said) — an",
+    "identifier belongs ONLY inside a citations[] entry, never inside the answer prose itself.",
     "",
     "Return ONLY a JSON object, no prose, no markdown fences, matching this shape exactly:",
     JSON.stringify(

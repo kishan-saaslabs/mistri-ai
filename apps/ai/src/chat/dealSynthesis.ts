@@ -46,6 +46,9 @@ function buildDealSynthesisPrompt(input: DealSynthesisInput): ChatMessage[] {
     "by name, with a short VERBATIM quote from that deal's block below — same wording, don't paraphrase. Never",
     "cite a deal that isn't listed below.",
     "",
+    "The \"answer\" text is for a human to read — refer to deals and calls only by their real name (never an",
+    "internal id). An identifier belongs ONLY inside a citations[] entry, never inside the answer prose itself.",
+    "",
     "Return ONLY a JSON object, no prose, no markdown fences, matching this shape exactly:",
     JSON.stringify({ answer: "string", citations: [{ dealName: "string", quote: "string" }] }, null, 2),
   ].join("\n");
