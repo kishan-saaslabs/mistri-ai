@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -109,8 +109,7 @@ export function LoginPage() {
           </div>
         </div>
 
-        <Button type="submit" size="lg" disabled={submitting} className="w-full">
-          {submitting && <Loader2 className="size-4 animate-spin" />}
+        <Button type="submit" size="lg" pending={submitting} className="w-full">
           {submitting ? "Signing in…" : "Sign in"}
         </Button>
       </form>

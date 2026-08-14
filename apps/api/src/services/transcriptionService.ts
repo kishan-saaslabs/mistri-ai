@@ -17,6 +17,7 @@ import { publishCallInsightsJob } from "../queue/callInsightsQueue.js";
 import { publishInferAndRenameJob } from "../queue/inferAndRenameQueue.js";
 import { publishKbIngestJob } from "../queue/kbIngestQueue.js";
 import { transcribeAudioFile } from "./pyaiHear.js";
+import { transcribeAudioFile, finishPyaiJob, PyaiPollTimeoutError } from "./pyaiHear.js";
 
 export type InferAndRenameResult = {
   inferred: InferredSpeaker[];
@@ -27,6 +28,87 @@ export type InferAndRenameResult = {
 
 function toSpeakerMap(inferred: InferredSpeaker[]): SpeakerMap {
   return Object.fromEntries(inferred.map((item) => [item.label, item.suggestedName]));
+}
+
+async function saveNamedTranscript(
+  transcription: TranscriptionRecord,
+  named: NamedTranscript,
+  inferred: InferredSpeaker[],
+  publishInsights: boolean,
+) {
+  await CallTranscriptModel.upsert({
+    callId: transcription.call_id,
+    transcriptionId: transcription.id,
+    segments: named,
+    inferredSpeakers: inferred,
+  });
+
+  if (publishInsights) {
+    try {
+      await publishCallInsightsJob({
+        callId: transcription.call_id,
+        transcriptionId: transcription.id,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Queue publish failed";
+      console.error("Could not enqueue call-insights:", message);
+    }
+  }
+
+  await TranscriptionModel.markLLMSuccess(transcription.id);
+}
+
+async function persistPyaiSuccess(
+  callId: string,
+  transcriptionId: string,
+  result: {
+    language: string | null;
+    durationSeconds: number | null;
+    fullText: string;
+    segments: TranscriptionRecord["segments"];
+  },
+) {
+  const saved = await TranscriptionModel.markReady(transcriptionId, {
+    language: result.language,
+    durationSeconds: result.durationSeconds,
+    fullText: result.fullText,
+    segments: result.segments,
+  });
+  if (!saved) {
+    throw new Error("Could not save transcription");
+  }
+
+  const duration = result.durationSeconds != null ? Math.round(result.durationSeconds) : undefined;
+  await CallModel.updateStatus(callId, "PYAI_SUCCESS", duration);
+
+  try {
+    await publishInferAndRenameJob({ callId, transcriptionId: saved.id });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Queue publish failed";
+    console.error("Could not enqueue infer-and-rename:", message);
+  }
+
+  return saved;
+}
+
+async function failPyai(callId: string, transcriptionId: string, error: unknown) {
+  const message = error instanceof Error ? error.message : "Transcription failed";
+  await TranscriptionModel.markFailed(transcriptionId, message);
+  await CallModel.updateStatus(callId, "PYAI_FAILED");
+}
+
+async function pollExistingPyaiJob(callId: string, transcriptionId: string, jobId: string) {
+  try {
+    const result = await finishPyaiJob(jobId);
+    return await persistPyaiSuccess(callId, transcriptionId, result);
+  } catch (error) {
+    if (error instanceof PyaiPollTimeoutError) {
+      console.error("PyAI job still running; leaving transcription in PYAI_TRANSCRIBING");
+      return null;
+    }
+    await failPyai(callId, transcriptionId, error);
+    throw error;
+  }
 }
 
 const mimeByExt: Record<string, string> = {
@@ -64,38 +146,31 @@ export const TranscriptionService = {
           audioUrl: call.source_url && /^https?:\/\//i.test(call.source_url) ? call.source_url : undefined,
         },
         {
-          onJobSubmitted: async () => {
-            await TranscriptionModel.markTranscribing(row.id);
+          onJobSubmitted: async (jobId) => {
+            await TranscriptionModel.markTranscribing(row.id, jobId);
           },
         },
       );
 
-      const saved = await TranscriptionModel.markReady(row.id, {
-        language: result.language,
-        durationSeconds: result.durationSeconds,
-        fullText: result.fullText,
-        segments: result.segments,
-      });
-      if (!saved) {
-        throw new Error("Could not save transcription");
-      }
-
-      const duration = result.durationSeconds != null ? Math.round(result.durationSeconds) : undefined;
-      await CallModel.updateStatus(callId, "PYAI_SUCCESS", duration);
-
-      try {
-        await publishInferAndRenameJob({ callId, transcriptionId: saved.id });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Queue publish failed";
-        console.error("Could not enqueue infer-and-rename:", message);
-      }
-
-      return saved;
+      return persistPyaiSuccess(callId, row.id, result);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Transcription failed";
-      await TranscriptionModel.markFailed(row.id, message);
-      await CallModel.updateStatus(callId, "PYAI_FAILED");
+      if (error instanceof PyaiPollTimeoutError) {
+        console.error("PyAI job still running; leaving transcription in PYAI_TRANSCRIBING");
+        return null;
+      }
+      await failPyai(callId, row.id, error);
       throw error;
+    }
+  },
+
+  async resumeInFlightJobs() {
+    const rows = await TranscriptionModel.listInFlightPyai();
+    for (const row of rows) {
+      if (!row.provider_job_id) continue;
+      void pollExistingPyaiJob(row.call_id, row.id, row.provider_job_id).catch((error) => {
+        const message = error instanceof Error ? error.message : "Transcription failed";
+        console.error("Resumed transcription failed:", message);
+      });
     }
   },
 
@@ -128,7 +203,7 @@ export const TranscriptionService = {
 
       if (segments.length === 0) {
         const named = applySpeakerNames(segments, {});
-        await TranscriptionModel.markLLMSuccess(transcription.id);
+        await saveNamedTranscript(transcription, named, [], true);
         return {
           inferred: [],
           transcript: named,
@@ -139,7 +214,7 @@ export const TranscriptionService = {
 
       if (!segments.some((segment) => segment.speaker !== null)) {
         const named = applySpeakerNames(segments, {});
-        await TranscriptionModel.markLLMSuccess(transcription.id);
+        await saveNamedTranscript(transcription, named, [], true);
         return {
           inferred: [],
           transcript: named,
@@ -190,6 +265,7 @@ export const TranscriptionService = {
       }
 
       await TranscriptionModel.markLLMSuccess(transcription.id);
+      await saveNamedTranscript(transcription, named, inferred, true);
       return { inferred, transcript: named, readable };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Speaker inference failed";

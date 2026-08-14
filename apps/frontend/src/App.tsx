@@ -15,8 +15,7 @@ import { WorkspaceProvider } from "@/state/workspace";
 /** Keeps signed-in users out of the login/register screens. */
 function GuestRoute() {
   const { user, loading } = useAuth();
-  if (loading) return null;
-  if (user) return <Navigate to="/deals" replace />;
+  if (!loading && user) return <Navigate to="/deals" replace />;
   return <Outlet />;
 }
 

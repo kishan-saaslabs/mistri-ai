@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Plus, UserPlus } from "lucide-react";
+import { ArrowLeft, Plus, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { AddCallDialog } from "@/components/deals/AddCallDialog";
 import { Button } from "@/components/ui/button";
@@ -454,13 +454,10 @@ function SettingsTab({
               type="button"
               data-icon="inline-start"
               onClick={addSelected}
-              disabled={!selected || adding}
+              disabled={!selected}
+              pending={adding}
             >
-              {adding ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <UserPlus className="size-3.5" />
-              )}
+              <UserPlus className="size-3.5" />
               Add member
             </Button>
           </div>

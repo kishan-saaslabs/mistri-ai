@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { ArrowUp } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { motionTransition, springs } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/state/workspace";
 
@@ -19,6 +21,7 @@ export function UploadCallDialog() {
   const [rep, setRep] = useState("sarah");
   const [dealId, setDealId] = useState("unassigned");
   const [dragOver, setDragOver] = useState(false);
+  const reduce = useReducedMotion();
 
   useEffect(() => {
     if (!uploadOpen) return;
@@ -67,51 +70,58 @@ export function UploadCallDialog() {
             <TabsTrigger value="file">Upload file</TabsTrigger>
             <TabsTrigger value="link">Paste a link</TabsTrigger>
           </TabsList>
-        </Tabs>
-
-        {mode === "file" ? (
-          <label
-            className={cn(
-              "mb-4 block cursor-pointer rounded-[9px] border-[1.5px] border-dashed border-border px-4 py-[26px] text-center",
-              dragOver && "border-brand bg-brand-tint",
-            )}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragOver(true);
-            }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragOver(false);
-              const next = event.dataTransfer.files[0];
-              if (next) setFile(next);
-            }}
-          >
-            <div className="mx-auto mb-2.5 flex size-[30px] items-center justify-center rounded-full bg-muted text-muted-foreground">
-              <ArrowUp className="size-3.5" />
-            </div>
-            <div className="text-[12.5px] text-muted-foreground">
-              Drop an MP3 or MP4 here, or <span className="text-brand underline">browse</span>
-            </div>
-            {file ? <div className="mt-2.5 font-mono text-[11.5px] text-ink-soft">{file.name}</div> : null}
-            <input
-              type="file"
-              accept={ACCEPT}
-              className="hidden"
-              onChange={(event) => {
-                const next = event.target.files?.[0];
+          <TabsContent value="file">
+            <motion.label
+              className={cn(
+                "mb-4 block cursor-pointer rounded-[9px] border-[1.5px] border-dashed border-border px-4 py-[26px] text-center",
+                dragOver && "border-brand bg-brand-tint",
+              )}
+              initial={false}
+              animate={{ scale: dragOver ? 1.015 : 1 }}
+              transition={motionTransition(reduce, springs.snappy)}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragOver(false);
+                const next = event.dataTransfer.files[0];
                 if (next) setFile(next);
               }}
+            >
+              <div className="mx-auto mb-2.5 flex size-[30px] items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <ArrowUp className="size-3.5" />
+              </div>
+              <div className="text-[12.5px] text-muted-foreground">
+                Drop an MP3 or MP4 here, or <span className="text-brand underline">browse</span>
+              </div>
+              {file ? (
+                <div className="mt-2.5 font-mono text-[11.5px] text-ink-soft">
+                  {file.name}
+                </div>
+              ) : null}
+              <input
+                type="file"
+                accept={ACCEPT}
+                className="hidden"
+                onChange={(event) => {
+                  const next = event.target.files?.[0];
+                  if (next) setFile(next);
+                }}
+              />
+            </motion.label>
+          </TabsContent>
+          <TabsContent value="link">
+            <Input
+              value={link}
+              onChange={(event) => setLink(event.target.value)}
+              placeholder="Paste a Zoom, Meet, or call recording link…"
+              className="mb-4"
             />
-          </label>
-        ) : (
-          <Input
-            value={link}
-            onChange={(event) => setLink(event.target.value)}
-            placeholder="Paste a Zoom, Meet, or call recording link…"
-            className="mb-4"
-          />
-        )}
+          </TabsContent>
+        </Tabs>
 
         <div className="mb-[18px] grid grid-cols-2 gap-2.5">
           <label className="flex flex-col gap-1.5 font-mono text-[10px] tracking-[0.06em] text-muted-foreground uppercase">

@@ -1,7 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { useQueries } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -109,8 +108,7 @@ export function DealsView() {
             onChange={(event) => setName(event.target.value)}
             placeholder="Deal name, e.g. Acme Corp"
           />
-          <Button type="submit" disabled={creating}>
-            {creating && <Loader2 className="size-4 animate-spin" />}
+          <Button type="submit" pending={creating}>
             Create deal
           </Button>
         </form>

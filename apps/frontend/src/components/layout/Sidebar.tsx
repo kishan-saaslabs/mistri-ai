@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { Handshake, Loader2, LogOut, Sparkles, Users, X } from "lucide-react";
+import { Handshake, LogOut, Sparkles, Users, X } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
+import { motionTransition, springs } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/state/auth";
 
@@ -33,15 +35,18 @@ const nav = [
 function SidebarBody({
   onNavigate,
   onClose,
+  pillId,
 }: {
   onNavigate?: () => void;
   onClose?: () => void;
+  pillId: string;
 }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const reduce = useReducedMotion();
 
   async function handleLogout() {
     if (signingOut) return;
@@ -94,14 +99,33 @@ function SidebarBody({
                     pathname.startsWith("/calls/")
                   : isActive;
               return cn(
-                "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] text-ink-soft",
-                active && "bg-muted font-semibold text-foreground",
-                !active && "hover:bg-muted hover:text-foreground",
+                "relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] text-ink-soft",
+                active && "font-semibold text-foreground",
+                !active && "hover:text-foreground",
               );
             }}
           >
-            <item.icon className="size-3.5 opacity-85" />
-            {item.label}
+            {({ isActive }) => {
+              const active =
+                item.to === "/deals"
+                  ? pathname === "/deals" ||
+                    pathname.startsWith("/deals/") ||
+                    pathname.startsWith("/calls/")
+                  : isActive;
+              return (
+                <>
+                  {active ? (
+                    <motion.span
+                      layoutId={pillId}
+                      className="absolute inset-0 rounded-md bg-muted"
+                      transition={motionTransition(reduce, springs.pill)}
+                    />
+                  ) : null}
+                  <item.icon className="relative z-1 size-3.5 opacity-85" />
+                  <span className="relative z-1">{item.label}</span>
+                </>
+              );
+            }}
           </NavLink>
         ))}
       </nav>
@@ -156,9 +180,8 @@ function SidebarBody({
               type="button"
               variant="destructive"
               onClick={() => void handleLogout()}
-              disabled={signingOut}
+              pending={signingOut}
             >
-              {signingOut ? <Loader2 className="size-4 animate-spin" /> : null}
               Sign out
             </Button>
           </div>
@@ -179,6 +202,7 @@ export function Sidebar({
   onOpenChange: (open: boolean) => void;
 }) {
   const { pathname } = useLocation();
+  const reduce = useReducedMotion();
 
   useEffect(() => {
     onOpenChange(false);
@@ -196,7 +220,7 @@ export function Sidebar({
   return (
     <>
       <aside className={cn("hidden md:flex", panelClass)}>
-        <SidebarBody />
+        <SidebarBody pillId="sidebar-nav-desktop" />
       </aside>
 
       <div
@@ -205,29 +229,29 @@ export function Sidebar({
           !open && "pointer-events-none",
         )}
       >
-        <button
+        <motion.button
           type="button"
           tabIndex={open ? 0 : -1}
           aria-label="Close menu"
-          className={cn(
-            "absolute inset-0 bg-black/40 transition-opacity duration-300",
-            open ? "opacity-100" : "opacity-0",
-          )}
+          className="absolute inset-0 bg-black/40"
+          initial={false}
+          animate={{ opacity: open ? 1 : 0 }}
+          transition={motionTransition(reduce, springs.overlay)}
           onClick={() => onOpenChange(false)}
         />
-        <aside
+        <motion.aside
           id="mobile-sidebar"
-          className={cn(
-            panelClass,
-            "relative max-w-[85vw] transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
-            open ? "translate-x-0" : "-translate-x-full",
-          )}
+          className={cn(panelClass, "relative max-w-[85vw]")}
+          initial={false}
+          animate={{ x: open ? 0 : "-100%" }}
+          transition={motionTransition(reduce, springs.smooth)}
         >
           <SidebarBody
+            pillId="sidebar-nav-mobile"
             onNavigate={() => onOpenChange(false)}
             onClose={() => onOpenChange(false)}
           />
-        </aside>
+        </motion.aside>
       </div>
     </>
   );

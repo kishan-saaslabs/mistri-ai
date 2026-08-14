@@ -7,9 +7,8 @@
 
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans:
-    "Geist Variable", "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, monospace;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, monospace;
   --color-brand: #2f6feb;
   --color-brand-hover: #1d54c4;
   --color-brand-tint: var(--brand-tint);
@@ -208,12 +207,31 @@
   background-color: transparent;
 }
 
+[data-sonner-toast] {
+  transition:
+    transform 500ms cubic-bezier(0.22, 1.2, 0.36, 1),
+    opacity 400ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 400ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 200ms ease;
+}
+[data-sonner-toast][data-expanded="false"][data-front="false"] {
+  --scale: var(--toasts-before) * 0.08 + 1;
+}
+[data-sonner-toast][data-mounted="true"][data-front="true"] {
+  box-shadow:
+    0 8px 24px oklch(0 0 0 / 0.12),
+    0 1px 0 oklch(0 0 0 / 0.04);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-morph-in {
     animation: none;
   }
   .morph-frame {
     transition: none;
+  }
+  [data-sonner-toast] {
+    transition: opacity 150ms ease;
   }
 }
 

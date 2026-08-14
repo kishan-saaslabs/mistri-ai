@@ -1,18 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { HealthGauge } from "@/components/calls/HealthGauge";
+import { ASK_SUGGESTIONS } from "@/lib/ask";
+import { motionTransition, springs } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/state/workspace";
 import type { CallRecord, Rep } from "@/types/domain";
-
-const SUGGESTIONS = [
-  "Which reps have deals at risk right now?",
-  "How is Sarah trending this month?",
-  "What's the riskiest deal on the team?",
-  "Summarize Melissa's Northwind call",
-];
 
 export function AskView() {
   const {
@@ -29,6 +25,7 @@ export function AskView() {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const reduce = useReducedMotion();
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -66,21 +63,32 @@ export function AskView() {
                 not just a summary.
               </p>
               <div className="flex flex-wrap justify-center gap-2">
-                {SUGGESTIONS.map((item) => (
-                  <button
+                {ASK_SUGGESTIONS.map((item) => (
+                  <motion.button
                     key={item}
                     type="button"
                     className="rounded-[7px] border border-border bg-background px-3.5 py-2 text-left text-[12.5px] text-ink-soft hover:border-brand hover:text-brand"
+                    whileTap={reduce ? undefined : { scale: 0.98 }}
+                    transition={motionTransition(reduce, springs.snappy)}
                     onClick={() => askQuestion(item)}
                   >
                     {item}
-                  </button>
+                  </motion.button>
                 ))}
               </div>
             </div>
           ) : (
             askHistory.map((entry, index) => (
-              <div key={`${entry.role}-${index}`} className="mb-[22px]">
+              <motion.div
+                key={`${entry.role}-${index}`}
+                className="mb-[22px]"
+                initial={reduce ? false : { opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{
+                  ...motionTransition(reduce, springs.gentle),
+                  delay: reduce ? 0 : entry.role === "bot" ? 0.04 : 0,
+                }}
+              >
                 {entry.role === "user" ? (
                   <div className="mb-2.5 text-[15px] font-semibold">{entry.text}</div>
                 ) : (
@@ -98,7 +106,7 @@ export function AskView() {
                     onEvidence={openEvidence}
                   />
                 )}
-              </div>
+              </motion.div>
             ))
           )}
           {askBusy ? <Reasoning /> : null}
@@ -108,6 +116,7 @@ export function AskView() {
         <div className="flex gap-2 rounded-[9px] border border-border bg-background py-1.5 pr-1.5 pl-3.5">
           <Input
             ref={inputRef}
+            id="ask-composer"
             className="h-8 border-0 bg-transparent shadow-none focus-visible:ring-0"
             placeholder="Ask a question…"
           />
@@ -254,6 +263,7 @@ const REASONING_STEPS = ["Reading transcript", "Checking evidence", "Preparing a
 
 function Reasoning() {
   const [active, setActive] = useState(0);
+  const reduce = useReducedMotion();
 
   useEffect(() => {
     const id = window.setInterval(() => setActive((n) => Math.min(REASONING_STEPS.length, n + 1)), 260);
@@ -261,19 +271,32 @@ function Reasoning() {
   }, []);
 
   return (
-    <div className="flex flex-col gap-1.5 py-1">
-      {REASONING_STEPS.map((step, index) => (
-        <div
-          key={step}
-          className={cn(
-            "flex items-center gap-2 font-mono text-[11.5px] text-muted-foreground opacity-40",
-            index < active && "text-ink-soft opacity-100",
-          )}
-        >
-          <span className="w-3 text-center">{index < active - 1 || active >= REASONING_STEPS.length ? "✓" : "○"}</span>
-          {step}…
-        </div>
-      ))}
+    <div className="relative flex flex-col gap-1.5 py-1">
+      {REASONING_STEPS.map((step, index) => {
+        const done = index < active;
+        return (
+          <motion.div
+            key={step}
+            className={cn(
+              "relative flex items-center gap-2 font-mono text-[11.5px]",
+              done ? "text-ink-soft" : "text-muted-foreground",
+            )}
+            initial={false}
+            animate={{ opacity: done ? 1 : 0.4 }}
+            transition={motionTransition(reduce, springs.gentle)}
+          >
+            {index === Math.min(active, REASONING_STEPS.length - 1) && active < REASONING_STEPS.length ? (
+              <motion.span
+                layoutId="ask-reasoning-dot"
+                className="absolute -left-1 size-1.5 rounded-full bg-brand"
+                transition={motionTransition(reduce, springs.pill)}
+              />
+            ) : null}
+            <span className="w-3 text-center">{index < active - 1 || active >= REASONING_STEPS.length ? "✓" : "○"}</span>
+            {step}…
+          </motion.div>
+        );
+      })}
     </div>
   );
 }

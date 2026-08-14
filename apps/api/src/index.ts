@@ -5,6 +5,7 @@ import { startCallInsightsWorker } from "./queue/callInsightsWorker.js";
 import { startInferAndRenameWorker } from "./queue/inferAndRenameWorker.js";
 import { startKbIngestWorker } from "./queue/kbIngestWorker.js";
 import { redisConnection } from "./queue/redisConnection.js";
+import { TranscriptionService } from "./services/transcriptionService.js";
 
 const app = createApp();
 
@@ -16,6 +17,11 @@ const server = app.listen(env.API_PORT, () => {
 const inferAndRenameWorker = startInferAndRenameWorker();
 const callInsightsWorker = startCallInsightsWorker();
 const kbIngestWorker = startKbIngestWorker();
+
+void TranscriptionService.resumeInFlightJobs().catch((error) => {
+  const message = error instanceof Error ? error.message : "Resume failed";
+  console.error("Could not resume in-flight transcriptions:", message);
+});
 
 async function shutdown() {
   server.close();

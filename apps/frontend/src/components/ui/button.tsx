@@ -1,11 +1,14 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
+import { Loader2 } from "lucide-react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { Slot } from "radix-ui"
 
+import { motionTransition, springs } from "@/lib/motion"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-colors outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -41,26 +44,87 @@ const buttonVariants = cva(
   }
 )
 
+type ButtonProps = Omit<
+  React.ComponentProps<"button">,
+  "onDrag" | "onDragStart" | "onDragEnd" | "onAnimationStart"
+> &
+  VariantProps<typeof buttonVariants> & {
+    asChild?: boolean
+    pending?: boolean
+  }
+
 function Button({
   className,
   variant = "default",
   size = "default",
   asChild = false,
+  pending,
+  disabled,
+  children,
   ...props
-}: React.ComponentProps<"button"> &
-  VariantProps<typeof buttonVariants> & {
-    asChild?: boolean
-  }) {
-  const Comp = asChild ? Slot.Root : "button"
+}: ButtonProps) {
+  const reduce = useReducedMotion()
+  const classNames = cn(buttonVariants({ variant, size, className }))
+  const tap =
+    reduce || variant === "link"
+      ? undefined
+      : { scale: 0.97 }
+  const hover =
+    reduce ||
+    pending ||
+    variant === "ghost" ||
+    variant === "link" ||
+    variant === "outline" ||
+    variant === "secondary" ||
+    size === "icon" ||
+    size === "icon-xs" ||
+    size === "icon-sm" ||
+    size === "icon-lg"
+      ? undefined
+      : { scale: 1.02 }
+
+  if (asChild) {
+    return (
+      <Slot.Root
+        data-slot="button"
+        data-variant={variant}
+        data-size={size}
+        className={classNames}
+        {...props}
+      >
+        {children}
+      </Slot.Root>
+    )
+  }
 
   return (
-    <Comp
+    <motion.button
       data-slot="button"
       data-variant={variant}
       data-size={size}
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={classNames}
+      disabled={disabled || pending}
+      aria-busy={pending || undefined}
+      layout={pending !== undefined}
+      whileTap={tap}
+      whileHover={hover}
+      transition={motionTransition(reduce, springs.press)}
       {...props}
-    />
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={pending ? "pending" : "idle"}
+          className="inline-flex items-center justify-center gap-1.5"
+          initial={reduce ? false : { opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={reduce ? { opacity: 0 } : { opacity: 0, y: -4 }}
+          transition={motionTransition(reduce, springs.snappy)}
+        >
+          {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+          {children}
+        </motion.span>
+      </AnimatePresence>
+    </motion.button>
   )
 }
 

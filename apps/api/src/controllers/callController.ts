@@ -74,6 +74,7 @@ export const CallController = {
     if (file.size <= 0) {
       res.setHeader("Content-Type", file.mime);
       res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
       res.setHeader("Content-Length", 0);
       res.end();
       return;
@@ -84,6 +85,7 @@ export const CallController = {
     res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Content-Type", file.mime);
     res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     res.setHeader(
       "Content-Disposition",
       `inline; filename="${file.downloadName}"`,

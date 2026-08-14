@@ -908,7 +908,7 @@ export const openApiSpec = {
         responses: {
           "200": {
             description:
-              "Call and its transcription rows. Segments come from transcriptions by default; once speaker-name inference succeeds for a transcription, its segments are replaced with the named version from call_transcripts (real speaker names instead of speaker_1/speaker_2).",
+              "Call and its transcription rows. Segments come from `transcriptions` until speaker-name inference finishes. When a transcription's status is LLM_SUCCESS, `segments` are served from `call_transcripts` (named speakers) for that transcription_id.",
             content: {
               "application/json": {
                 schema: {
