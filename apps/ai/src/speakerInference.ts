@@ -1,7 +1,6 @@
 import type { LLMClient } from "./llm/llmClient.js";
 import type { InferredSpeaker, Transcript, TranscriptSegment } from "./types.js";
-
-const SELF_INTRO_PATTERNS = [/this is (\w+)/i, /(\w+) here\b/i, /i'?m (\w+)/i];
+import { parseJsonLeniently } from "./util/parseJson.js";
 
 // These are the exact role-guess fallbacks the prompt instructs the model
 // to use when there's no evidence for a name — two different unnamed
@@ -24,9 +23,9 @@ type EligibleSegment = TranscriptSegment & { speaker: string; type: "final" };
  * possibly-truncated text (pyaiHear.ts preserves whatever the provider
  * marked as "partial", and a status: 'ready' transcription can still
  * contain individual partial segments — e.g. a trailing utterance that
- * never finalized). Feeding either into the regex pass or the LLM risks a
- * wrong or garbled name carrying the same confidence as a clean segment,
- * so both are excluded from the inference input entirely.
+ * never finalized). Feeding either into the LLM risks a wrong or garbled
+ * name carrying the same confidence as a clean segment, so both are
+ * excluded from the inference input entirely.
  */
 function isEligible(segment: TranscriptSegment): segment is EligibleSegment {
   return segment.speaker !== null && segment.type === "final";
@@ -44,31 +43,54 @@ function distinctLabelsInOrder(segments: EligibleSegment[]): string[] {
   return labels;
 }
 
-function regexResolve(segments: EligibleSegment[], labels: string[]): Map<string, InferredSpeaker> {
-  const resolved = new Map<string, InferredSpeaker>();
-  for (const label of labels) {
-    for (const segment of segments) {
-      if (segment.speaker !== label) continue;
-      const match = SELF_INTRO_PATTERNS.map((pattern) => segment.text.match(pattern)).find(Boolean);
-      if (match?.[1]) {
-        resolved.set(label, {
-          label,
-          suggestedName: match[1],
-          confidence: "high",
-          evidence: segment.text.trim().slice(0, 200),
-        });
-        break;
-      }
-    }
-  }
-  return resolved;
-}
-
 function renderTranscriptBlock(segments: EligibleSegment[]): string {
   return segments.map((segment, index) => `${index + 1}. [${segment.speaker}] ${segment.text}`).join("\n");
 }
 
-function buildPrompt(segments: EligibleSegment[], unresolvedLabels: string[], alreadyResolved: Map<string, InferredSpeaker>) {
+/**
+ * Confirmed live: on a long transcript where a speaker has few total
+ * turns, their one crucial opening line (often the only self-introduction
+ * evidence that exists) loses out to "lost in the middle" attention decay
+ * — a model correctly extracted a name spoken on turn 7 of 29, but missed
+ * an equally explicit self-introduction sitting in turn 1, even
+ * responding with evidence: "self-introduction" while still falling back
+ * to a role guess instead of the name. Re-surfacing each label's own
+ * first line right next to the resolution instruction — where recency
+ * gives it full attention weight regardless of overall transcript length
+ * — is a prompt-structure fix, not a pattern-matching one: the model
+ * still does all the judgment, it just isn't fighting transcript length
+ * to find the most relevant sentence for each label.
+ */
+function firstUtteranceByLabel(segments: EligibleSegment[], labels: string[]): string {
+  return labels
+    .map((label) => {
+      const first = segments.find((s) => s.speaker === label);
+      return first ? `${label}: ${first.text}` : null;
+    })
+    .filter((line): line is string => !!line)
+    .join("\n");
+}
+
+/**
+ * There is deliberately no regex pre-pass here anymore. It used to try to
+ * shortcut obvious cases ("this is X", "I'm X", being addressed as "Miss
+ * X") to skip an LLM call — but every one of those patterns turned out to
+ * have real, confirmed-live false positives ("I'm calling" → "calling",
+ * "I'm really understaffed" → "really", even "this is unacceptable" would
+ * extract "unacceptable"), each accepted at confidence: "high" with
+ * nothing downstream positioned to catch it. This is not a fixable-by-
+ * more-patterns problem: natural language has unbounded ways to continue
+ * a sentence or address someone, so no denylist is ever complete. The
+ * task is fundamentally about understanding MEANING, which is exactly
+ * what the LLM (with full transcript context, an explicit
+ * no-guessing instruction, and the duplicate-name/hallucination
+ * safety nets below) is actually suited for — regex was pattern-matching
+ * syntax and losing. The LLM call also already has to run for the large
+ * majority of real calls anyway (rarely does every speaker cleanly
+ * self-introduce), so the regex layer was buying very little cost
+ * savings in exchange for this entire bug class.
+ */
+function buildPrompt(segments: EligibleSegment[], labels: string[]) {
   const system = [
     "You identify speakers in a call transcript by their diarization label (e.g. speaker_1).",
     "For each label listed, infer the speaker's likely real name ONLY if the transcript contains",
@@ -81,23 +103,20 @@ function buildPrompt(segments: EligibleSegment[], unresolvedLabels: string[], al
     '(generic role guesses like "Agent" or "Customer" may repeat, real names may not) — a speaker',
     "greeting another speaker by name does not mean the greeter shares that name.",
     "",
-    'Return ONLY a JSON array, no prose, no markdown fences, matching this shape exactly:',
+    "Return ONLY a JSON array, no prose, no markdown fences, matching this shape exactly:",
     '[{ "label": string, "suggestedName": string, "confidence": "high" | "medium" | "low", "evidence": string }]',
   ].join("\n");
 
-  const userLines = ["Transcript:", renderTranscriptBlock(segments)];
-
-  if (alreadyResolved.size > 0) {
-    const taken = [...alreadyResolved.values()]
-      .map((item) => `${item.label} = ${item.suggestedName}`)
-      .join(", ");
-    userLines.push(
-      "",
-      `Already identified (do not reuse these names for anyone else): ${taken}`,
-    );
-  }
-
-  userLines.push("", `Resolve exactly these labels: ${unresolvedLabels.join(", ")}`);
+  const userLines = [
+    "Transcript:",
+    renderTranscriptBlock(segments),
+    "",
+    "Each label's own first line, for reference (self-introductions are usually here, but check the",
+    "full transcript above too — being addressed by name, or named in context, can appear anywhere):",
+    firstUtteranceByLabel(segments, labels),
+    "",
+    `Resolve exactly these labels: ${labels.join(", ")}`,
+  ];
 
   return [
     { role: "system" as const, content: system },
@@ -116,13 +135,9 @@ function isValidInferredSpeaker(value: unknown): value is InferredSpeaker {
   );
 }
 
-function parseAndValidate(raw: string, allowedLabels: Set<string>, takenNames: Set<string>): InferredSpeaker[] | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
+function parseAndValidate(raw: string, allowedLabels: Set<string>): InferredSpeaker[] | null {
+  const parsed: unknown = parseJsonLeniently(raw);
+  if (parsed === null) return null;
 
   if (!Array.isArray(parsed)) return null;
   if (!parsed.every(isValidInferredSpeaker)) return null;
@@ -139,11 +154,10 @@ function parseAndValidate(raw: string, allowedLabels: Set<string>, takenNames: S
 
   // A real name can't legitimately belong to two different diarized
   // speakers on the same call (generic role guesses are exempt — see
-  // GENERIC_ROLE_NAMES). Catches the model reusing an already-resolved
-  // name (e.g. one speaker greets the other by name mid-turn, and the
-  // model attributes that name to the wrong speaker) as well as assigning
-  // the same name to two labels within this same response.
-  const seenNames = new Set(takenNames);
+  // GENERIC_ROLE_NAMES). Catches the model reusing a name across two
+  // labels (e.g. one speaker greets the other by name mid-turn, and the
+  // model attributes that name to the wrong speaker).
+  const seenNames = new Set<string>();
   for (const item of parsed) {
     const normalized = normalizeName(item.suggestedName);
     if (GENERIC_ROLE_NAMES.has(normalized)) continue;
@@ -165,10 +179,18 @@ function positionalFallback(labels: string[]): InferredSpeaker[] {
 
 /**
  * Infers likely real names for each diarized speaker label in a
- * transcript. Never hallucinates a name without evidence — the LLM prompt
- * explicitly instructs a role-guess fallback over guessing, and a
- * double LLM failure degrades to a positional fallback rather than
+ * transcript, entirely via the LLM (see buildPrompt's comment for why
+ * there's no regex pre-pass). Never hallucinates a name without evidence
+ * — the prompt explicitly instructs a role-guess fallback over guessing,
+ * and a double LLM failure degrades to a positional fallback rather than
  * surfacing bad output.
+ *
+ * jsonMode (response_format: json_object) is deliberately not used —
+ * confirmed live elsewhere in this codebase that NVIDIA NIM's enforcement
+ * of it degrades to garbage output for a large enough prompt, and this
+ * function renders the whole transcript into one prompt. parseJsonLeniently
+ * is the safety net for the rarer case of a stray leading token even in
+ * plain-text mode.
  */
 export async function inferSpeakerNames(transcript: Transcript, client: LLMClient): Promise<InferredSpeaker[]> {
   const eligible = transcript.filter(isEligible);
@@ -181,25 +203,13 @@ export async function inferSpeakerNames(transcript: Transcript, client: LLMClien
   }
 
   const labels = distinctLabelsInOrder(eligible);
-  const resolvedByRegex = regexResolve(eligible, labels);
-  const unresolvedLabels = labels.filter((label) => !resolvedByRegex.has(label));
+  const messages = buildPrompt(eligible, labels);
+  const allowedLabels = new Set(labels);
 
-  if (unresolvedLabels.length === 0) {
-    return labels.map((label) => resolvedByRegex.get(label)!);
-  }
+  let raw = await client.complete(messages, { temperature: 0 });
+  let resolved = parseAndValidate(raw, allowedLabels);
 
-  const messages = buildPrompt(eligible, unresolvedLabels, resolvedByRegex);
-  const allowedLabels = new Set(unresolvedLabels);
-  const takenNames = new Set(
-    [...resolvedByRegex.values()]
-      .map((item) => normalizeName(item.suggestedName))
-      .filter((name) => !GENERIC_ROLE_NAMES.has(name)),
-  );
-
-  let raw = await client.complete(messages, { jsonMode: true, temperature: 0 });
-  let llmResolved = parseAndValidate(raw, allowedLabels, takenNames);
-
-  if (!llmResolved) {
+  if (!resolved) {
     raw = await client.complete(
       [
         ...messages,
@@ -207,18 +217,16 @@ export async function inferSpeakerNames(transcript: Transcript, client: LLMClien
           role: "user" as const,
           content:
             "Return ONLY a JSON array. No prose, no markdown fences, no explanation. " +
-            "Every speaker must have a name distinct from every other speaker already identified " +
-            "on this call (generic roles like Agent/Customer may repeat, real names may not).",
+            "Every speaker must have a name distinct from every other speaker on this call " +
+            "(generic roles like Agent/Customer may repeat, real names may not).",
         },
       ],
-      { jsonMode: true, temperature: 0 },
+      { temperature: 0 },
     );
-    llmResolved = parseAndValidate(raw, allowedLabels, takenNames);
+    resolved = parseAndValidate(raw, allowedLabels);
   }
 
-  const finalLlmResults = llmResolved ?? positionalFallback(unresolvedLabels);
-
-  const byLabel = new Map<string, InferredSpeaker>([...resolvedByRegex, ...finalLlmResults.map((item) => [item.label, item] as const)]);
-
+  const finalResults = resolved ?? positionalFallback(labels);
+  const byLabel = new Map(finalResults.map((item) => [item.label, item] as const));
   return labels.map((label) => byLabel.get(label)!);
 }
