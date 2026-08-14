@@ -24,7 +24,31 @@ function sseWrite(res: Response, event: string, data: unknown) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+const listConversationsQuerySchema = z.object({
+  callId: z.string().uuid().optional(),
+  dealId: z.string().uuid().optional(),
+});
+
 export const ConversationController = {
+  list: asyncHandler(async (req: Request, res: Response) => {
+    const actor = requireUser(req);
+    const query = listConversationsQuerySchema.parse({
+      callId:
+        typeof req.query.callId === "string" && req.query.callId
+          ? req.query.callId
+          : undefined,
+      dealId:
+        typeof req.query.dealId === "string" && req.query.dealId
+          ? req.query.dealId
+          : undefined,
+    });
+    const conversations = await ChatService.listConversations(actor.id, {
+      scopeCallId: query.callId,
+      scopeDealId: query.dealId,
+    });
+    res.json({ conversations });
+  }),
+
   create: asyncHandler(async (req: Request, res: Response) => {
     const actor = requireUser(req);
     const body = createConversationSchema.parse(req.body);

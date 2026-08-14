@@ -42,6 +42,7 @@ apiRouter.get("/calls/:id/insights", CallController.insights);
 
 apiRouter.post("/search", SearchController.search);
 
+apiRouter.get("/conversations", ConversationController.list);
 apiRouter.post("/conversations", ConversationController.create);
 apiRouter.get("/conversations/:id/messages", ConversationController.listMessages);
 apiRouter.post("/conversations/:id/messages", ConversationController.postMessage);

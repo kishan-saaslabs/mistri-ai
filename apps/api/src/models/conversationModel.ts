@@ -21,6 +21,31 @@ export const ConversationModel = {
     return queryOne<ConversationRecord>("SELECT * FROM conversations WHERE id = $1", [id]);
   },
 
+  listForUser(input: {
+    userId: string;
+    organizationId: string;
+    scopeCallId?: string;
+    scopeDealId?: string;
+  }) {
+    const params: unknown[] = [input.userId, input.organizationId];
+    const filters = ["user_id = $1", "organization_id = $2"];
+    if (input.scopeCallId) {
+      params.push(input.scopeCallId);
+      filters.push(`scope_call_id = $${params.length}`);
+    }
+    if (input.scopeDealId) {
+      params.push(input.scopeDealId);
+      filters.push(`scope_deal_id = $${params.length}`);
+    }
+    return query<ConversationRecord>(
+      `SELECT * FROM conversations
+       WHERE ${filters.join(" AND ")}
+       ORDER BY last_activity_at DESC
+       LIMIT 100`,
+      params,
+    );
+  },
+
   create(input: {
     organizationId: string;
     userId: string;

@@ -375,6 +375,19 @@ export const openApiSpec = {
           dealId: { type: "string", format: "uuid", description: "Required when scopeType is 'deal'" },
         },
       },
+      Conversation: {
+        type: "object",
+        properties: {
+          id: { type: "string", format: "uuid" },
+          scope_type: { type: "string", enum: ["call", "deal"] },
+          scope_call_id: { type: "string", format: "uuid", nullable: true },
+          scope_deal_id: { type: "string", format: "uuid", nullable: true },
+          title: { type: "string", nullable: true },
+          turn_count: { type: "integer" },
+          created_at: { type: "string", format: "date-time" },
+          last_activity_at: { type: "string", format: "date-time" },
+        },
+      },
       CreateConversationResponse: {
         type: "object",
         properties: {
@@ -1132,6 +1145,49 @@ export const openApiSpec = {
       },
     },
     "/api/conversations": {
+      get: {
+        tags: ["Chat"],
+        summary: "List AI chat conversations for the current user",
+        description:
+          "Returns the signed-in user's conversations, newest activity first. Optional `callId` or `dealId` filters to chats on that call or deal.",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "callId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+            description: "Only conversations scoped to this call",
+          },
+          {
+            name: "dealId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+            description: "Only conversations scoped to this deal",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Conversations for the current user",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    conversations: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/Conversation" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "Validation failed" },
+          "401": { description: "Authentication required" },
+        },
+      },
       post: {
         tags: ["Chat"],
         summary: "Start a chat conversation scoped to one call or one deal",

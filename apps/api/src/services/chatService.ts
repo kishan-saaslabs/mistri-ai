@@ -9,7 +9,7 @@ import {
 } from "@mistri-ai/ai";
 import { CallInsightModel } from "../models/callInsightModel.js";
 import { ChunkModel } from "../models/chunkModel.js";
-import { ConversationModel, type ChatScopeType } from "../models/conversationModel.js";
+import { ConversationModel, type ChatScopeType, type ConversationRecord } from "../models/conversationModel.js";
 import { MessageModel } from "../models/messageModel.js";
 import { TopicSegmentModel } from "../models/topicSegmentModel.js";
 import { UserModel } from "../models/userModel.js";
@@ -144,7 +144,35 @@ function formatStructuredLiteAnswer(
   }
 }
 
+function toPublicConversation(row: ConversationRecord) {
+  return {
+    id: row.id,
+    scope_type: row.scope_type,
+    scope_call_id: row.scope_call_id,
+    scope_deal_id: row.scope_deal_id,
+    title: row.title,
+    turn_count: row.turn_count,
+    created_at: row.created_at,
+    last_activity_at: row.last_activity_at,
+  };
+}
+
 export const ChatService = {
+  async listConversations(
+    actorId: string,
+    filters: { scopeCallId?: string; scopeDealId?: string } = {},
+  ) {
+    const actor = await UserModel.findById(actorId);
+    if (!actor) throw new HttpError(401, "Authentication required");
+    const rows = await ConversationModel.listForUser({
+      userId: actor.id,
+      organizationId: actor.organization_id,
+      scopeCallId: filters.scopeCallId,
+      scopeDealId: filters.scopeDealId,
+    });
+    return rows.map(toPublicConversation);
+  },
+
   async createConversation(
     actorId: string,
     input: { scopeType: ChatScopeType; scopeCallId?: string; scopeDealId?: string },
