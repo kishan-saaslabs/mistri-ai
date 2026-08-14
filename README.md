@@ -4,6 +4,8 @@ Open-source conversation intelligence for sales teams — an MIT-licensed altern
 
 ![Deals view](docs/screenshots/deals-view.png)
 
+![Ask AI view](docs/screenshots/ask-ai.png)
+
 Mistri AI records the shape of a deal from the call itself: transcript, deal health, buying signals, risks, and next steps. This repository is a pnpm workspace with two apps:
 
 | App | Stack | Path |
