@@ -1,16 +1,22 @@
 import { getEmbeddingClient } from "@mistri-ai/ai";
 import { CallTranscriptModel } from "../models/callTranscriptModel.js";
 import { ChunkModel, type ChunkRecord } from "../models/chunkModel.js";
+import { DealModel } from "../models/dealModel.js";
 import { TopicSegmentModel } from "../models/topicSegmentModel.js";
 import { TranscriptionModel } from "../models/transcriptionModel.js";
 import { HttpError } from "../utils/httpError.js";
-import { CallService } from "./callService.js";
+import { CallService, DealService } from "./callService.js";
 
 export type ChatScopeInput = {
-  scopeType: "call" | "deal";
+  scopeType: "call" | "deal" | "global";
   scopeCallId?: string;
   scopeDealId?: string;
+  /** 'global' only — narrow "everything you can see" down to just these deals/calls. */
+  focusDealIds?: string[];
+  focusCallIds?: string[];
 };
+
+export type DealMention = { dealId: string; dealName: string };
 
 export type ResolvedScope = {
   transcriptionIds: string[];
@@ -48,9 +54,9 @@ const STRUCTURED_FIELD_PATTERNS: [RegExp, StructuredField][] = [
  * The one scope-resolution function — every downstream retrieval or chat
  * call gets its transcription-id list from here, never constructed any
  * other way. Delegates ACL entirely to CallService's existing
- * requireCall/listByDeal (the same gates every other per-call/per-deal
- * route in this codebase already goes through) rather than introducing a
- * parallel access-control path.
+ * requireCall/listByDeal/list (the same gates every other per-call/
+ * per-deal/list route in this codebase already goes through) rather than
+ * introducing a parallel access-control path.
  */
 export const RetrievalService = {
   async resolveChatScope(actorId: string, scope: ChatScopeInput): Promise<ResolvedScope> {
@@ -64,12 +70,99 @@ export const RetrievalService = {
       };
     }
 
-    if (!scope.scopeDealId) throw new HttpError(400, "scopeDealId is required for scopeType 'deal'");
-    const calls = await CallService.listByDeal(actorId, scope.scopeDealId);
+    if (scope.scopeType === "deal") {
+      if (!scope.scopeDealId) throw new HttpError(400, "scopeDealId is required for scopeType 'deal'");
+      const [calls, deal] = await Promise.all([
+        CallService.listByDeal(actorId, scope.scopeDealId),
+        DealModel.findById(scope.scopeDealId),
+      ]);
+      const perCall = await Promise.all(calls.map((c) => TranscriptionModel.listByCallId(c.id)));
+      // The deal's real name, not just a call count — the model otherwise
+      // has no legitimate way to refer to the deal by name in its answer
+      // (it would have to guess or echo something from conversation
+      // history instead of the actual authorized scope it was given).
+      const dealLabel = deal ? `the deal "${deal.name}"` : "this deal";
+      return {
+        transcriptionIds: perCall.flat().map((t) => t.id),
+        scopeDescription: `${dealLabel} (${calls.length} call${calls.length === 1 ? "" : "s"})`,
+      };
+    }
+
+    // 'global': every call this specific user can already see —
+    // CallService.list() already branches on role (owner/admin: every
+    // call in the org; member: only calls they're assigned to via
+    // user_deals, plus their own unassigned uploads) via the exact same
+    // gate every other list endpoint in this codebase goes through. No
+    // new access-control logic — "global" is a scope, not a permission.
+    const allCalls = await CallService.list(actorId);
+
+    // Focus narrows the authorized set down further, it never expands it —
+    // a focusDealIds/focusCallIds entry the actor can't already see (stale
+    // reference, since re-checked every turn) is silently excluded rather
+    // than granting access, same posture as the carried-evidence re-auth
+    // filter in chatService.
+    const focusDealIds = new Set(scope.focusDealIds ?? []);
+    const focusCallIds = new Set(scope.focusCallIds ?? []);
+    const hasFocus = focusDealIds.size > 0 || focusCallIds.size > 0;
+    const calls = hasFocus
+      ? allCalls.filter((c) => (c.deal_id && focusDealIds.has(c.deal_id)) || focusCallIds.has(c.id))
+      : allCalls;
+
     const perCall = await Promise.all(calls.map((c) => TranscriptionModel.listByCallId(c.id)));
+
+    let scopeDescription: string;
+    if (!hasFocus) {
+      scopeDescription = `everything you have access to (${calls.length} call${calls.length === 1 ? "" : "s"})`;
+    } else if (focusDealIds.size > 0) {
+      // Same reasoning as the 'deal' branch above: name the actual deal(s),
+      // don't just say "your focused selection" — real names, not a
+      // hardcoded label, since that's what lets the model refer to them
+      // legitimately instead of guessing from history.
+      const focusedDeals = await Promise.all([...focusDealIds].map((id) => DealModel.findById(id)));
+      const dealNames = focusedDeals.filter((d): d is NonNullable<typeof d> => !!d).map((d) => `"${d.name}"`);
+      const dealPart = dealNames.length > 0 ? `deal${dealNames.length === 1 ? "" : "s"} ${dealNames.join(", ")}` : "your focused selection";
+      scopeDescription = `${dealPart} (${calls.length} call${calls.length === 1 ? "" : "s"})`;
+    } else {
+      scopeDescription = `your focused selection (${calls.length} call${calls.length === 1 ? "" : "s"})`;
+    }
+
     return {
       transcriptionIds: perCall.flat().map((t) => t.id),
-      scopeDescription: `this deal (${calls.length} call${calls.length === 1 ? "" : "s"})`,
+      scopeDescription,
+    };
+  },
+
+  /**
+   * Best-effort: does the (already contextualized) query name one of the
+   * deals this actor can see? Whole-word, case-insensitive match against
+   * each accessible deal's name. Deliberately conservative — only narrows
+   * global scope when exactly one deal matches, since a wrong narrow
+   * silently hides evidence the user might actually need, which is worse
+   * than not narrowing at all. Names under 3 characters are skipped as too
+   * likely to false-positive on ordinary words.
+   */
+  async detectDealMention(actorId: string, query: string): Promise<DealMention | null> {
+    const deals = await DealService.list(actorId);
+    const matches = deals.filter((d) => {
+      const name = d.name.trim();
+      if (name.length < 3) return false;
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`\\b${escaped}\\b`, "i").test(query);
+    });
+    if (matches.length !== 1) return null;
+    return { dealId: matches[0]!.id, dealName: matches[0]!.name };
+  },
+
+  /** Same shape as the 'deal' scope branch above — used to narrow an
+   * already-created 'global' conversation to a deal mentioned in one turn's
+   * question, without persisting the narrowing to later turns. */
+  async scopeForDeal(actorId: string, dealId: string): Promise<ResolvedScope> {
+    const [calls, deal] = await Promise.all([CallService.listByDeal(actorId, dealId), DealModel.findById(dealId)]);
+    const perCall = await Promise.all(calls.map((c) => TranscriptionModel.listByCallId(c.id)));
+    const dealLabel = deal ? `the deal "${deal.name}"` : "this deal";
+    return {
+      transcriptionIds: perCall.flat().map((t) => t.id),
+      scopeDescription: `${dealLabel} (${calls.length} call${calls.length === 1 ? "" : "s"})`,
     };
   },
 
@@ -77,10 +170,14 @@ export const RetrievalService = {
    * Rules-first router (§7.2 of the source spec, reduced scope per the
    * plan): WHOLE_CALL and STRUCTURED_LITE only apply at call scope, since
    * both read a single call's own call_insights/topic summaries directly.
-   * Everything else — including anything unmatched — defaults to
-   * SEMANTIC, the safe default.
+   * Everything else — including deal/global scope and anything unmatched
+   * — defaults to SEMANTIC, the safe default. Global scope in particular
+   * gets no aggregate/"how many" shortcut here (no rollups exist) —
+   * see the plan's explicit deferrals; an aggregate question at global
+   * scope still goes through plain semantic retrieval today, which is a
+   * known, flagged gap, not silently "handled."
    */
-  route(query: string, scopeType: "call" | "deal"): { route: Route; field?: StructuredField } {
+  route(query: string, scopeType: "call" | "deal" | "global"): { route: Route; field?: StructuredField } {
     if (scopeType === "call") {
       if (WHOLE_CALL_PATTERNS.some((p) => p.test(query))) return { route: "WHOLE_CALL" };
       const field = STRUCTURED_FIELD_PATTERNS.find(([p]) => p.test(query));

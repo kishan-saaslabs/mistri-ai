@@ -24,6 +24,10 @@ export const CallTranscriptModel = {
     );
   },
 
+  listAllTranscriptionIds() {
+    return query<{ transcription_id: string }>("SELECT transcription_id FROM call_transcripts", []);
+  },
+
   listByTranscriptionIds(transcriptionIds: string[]) {
     if (transcriptionIds.length === 0) {
       return Promise.resolve([] as CallTranscriptRecord[]);

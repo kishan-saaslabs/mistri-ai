@@ -13,7 +13,7 @@
 - ⌘K opens just under the navbar; matching a deal navigates there; unmatched text opens Ask with the composer filled (do not auto-send). Ask threads use a ChatGPT-style layout (user right, Mistri left) with a simple Generating/Loading state.
 
 ## Learned Workspace Facts
-- Local Docker is OrbStack; Postgres runs via docker compose (`pnpm bootstrap` / `pnpm docker:up`) as `pgvector/pgvector:pg16` on localhost:5432 with db/user `mistri`. Redis defaults to localhost:6379 (`REDIS_PORT` / `REDIS_URL` in `.env`).
+- Local Docker is OrbStack; Postgres runs via docker compose (`pnpm bootstrap` / `pnpm docker:up`) as `pgvector/pgvector:pg16` on localhost:5432 with db/user `mistri`. Redis defaults to localhost:6379 (`REDIS_PORT` / `REDIS_URL` in `.env`). MinIO object storage is on localhost:9000 (`S3_*` in `.env`); recordings are stored there, not on the API disk.
 - Postgres applies `POSTGRES_PASSWORD` only on first volume init; after changing `.env`, recreate with `docker compose down -v` then `pnpm db:up`.
 - The API reads repo-root `.env`; `pnpm db:migrate` and `pnpm db:seed` use that `DATABASE_URL`.
 - Call details (`CallDetailView`) loads transcript from the call API and Intel from `GET /api/calls/:id/insights`; do not fetch or poll insights until a transcription exists (`PYAI_SUCCESS` or later). The title shows speaker count; transcript labels use `speakerName`.

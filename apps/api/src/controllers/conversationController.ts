@@ -7,16 +7,26 @@ import { HttpError } from "../utils/httpError.js";
 
 const createConversationSchema = z
   .object({
-    scopeType: z.enum(["call", "deal"]),
+    scopeType: z.enum(["call", "deal", "global"]),
     callId: z.string().uuid().optional(),
     dealId: z.string().uuid().optional(),
   })
-  .refine((v) => (v.scopeType === "call" ? !!v.callId : !!v.dealId), {
-    message: "callId is required for scopeType 'call'; dealId is required for scopeType 'deal'",
-  });
+  .refine(
+    (v) => {
+      if (v.scopeType === "call") return !!v.callId;
+      if (v.scopeType === "deal") return !!v.dealId;
+      return true; // 'global' needs neither — it's every call this user can already see
+    },
+    { message: "callId is required for scopeType 'call'; dealId is required for scopeType 'deal'" },
+  );
 
 const postMessageSchema = z.object({
   content: z.string().trim().min(1).max(4000),
+  // 'global'-conversation-only: narrow "everything you have access to" down
+  // to a specific set of deals/calls FOR THIS QUESTION — a later message in
+  // the same thread with no focus (or a different one) isn't bound by it.
+  focusDealIds: z.array(z.string().uuid()).max(50).optional(),
+  focusCallIds: z.array(z.string().uuid()).max(50).optional(),
 });
 
 function sseWrite(res: Response, event: string, data: unknown) {
@@ -24,7 +34,65 @@ function sseWrite(res: Response, event: string, data: unknown) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+const conversationIdSchema = z.string().uuid();
+
+const listConversationsQuerySchema = z.object({
+  callId: z.string().uuid().optional(),
+  dealId: z.string().uuid().optional(),
+});
+
+const searchConversationsQuerySchema = listConversationsQuerySchema.extend({
+  q: z.string().trim().min(1).max(200),
+});
+
 export const ConversationController = {
+  list: asyncHandler(async (req: Request, res: Response) => {
+    const actor = requireUser(req);
+    const query = listConversationsQuerySchema.parse({
+      callId:
+        typeof req.query.callId === "string" && req.query.callId
+          ? req.query.callId
+          : undefined,
+      dealId:
+        typeof req.query.dealId === "string" && req.query.dealId
+          ? req.query.dealId
+          : undefined,
+    });
+    const conversations = await ChatService.listConversations(actor.id, {
+      scopeCallId: query.callId,
+      scopeDealId: query.dealId,
+    });
+    res.json({ conversations });
+  }),
+
+  search: asyncHandler(async (req: Request, res: Response) => {
+    const actor = requireUser(req);
+    const query = searchConversationsQuerySchema.parse({
+      q: typeof req.query.q === "string" ? req.query.q : undefined,
+      callId:
+        typeof req.query.callId === "string" && req.query.callId
+          ? req.query.callId
+          : undefined,
+      dealId:
+        typeof req.query.dealId === "string" && req.query.dealId
+          ? req.query.dealId
+          : undefined,
+    });
+    const conversations = await ChatService.searchConversations(actor.id, {
+      q: query.q,
+      scopeCallId: query.callId,
+      scopeDealId: query.dealId,
+    });
+    res.json({ conversations });
+  }),
+
+  remove: asyncHandler(async (req: Request, res: Response) => {
+    const actor = requireUser(req);
+    const conversationId = conversationIdSchema.parse(req.params.id);
+    await ChatService.deleteConversation(actor.id, conversationId);
+    res.status(204).send();
+  }),
+
   create: asyncHandler(async (req: Request, res: Response) => {
     const actor = requireUser(req);
     const body = createConversationSchema.parse(req.body);
@@ -66,7 +134,10 @@ export const ConversationController = {
       sseWrite(res, "stage", { stage: "authorizing" });
       sseWrite(res, "stage", { stage: "retrieving" });
 
-      const message = await ChatService.postMessage(actor.id, conversationId, body.content);
+      const message = await ChatService.postMessage(actor.id, conversationId, body.content, {
+        focusDealIds: body.focusDealIds,
+        focusCallIds: body.focusCallIds,
+      });
 
       sseWrite(res, "stage", { stage: "generating" });
       sseWrite(res, "answer", { text: message?.content ?? "" });

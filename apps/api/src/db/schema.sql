@@ -340,12 +340,33 @@ CREATE TABLE IF NOT EXISTS conversations (
   turn_count         INTEGER NOT NULL DEFAULT 0,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_activity_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT conversations_scope_type_check CHECK (scope_type IN ('call', 'deal')),
+  CONSTRAINT conversations_scope_type_check CHECK (scope_type IN ('call', 'deal', 'global')),
   CONSTRAINT conversations_scope_coherent CHECK (
     (scope_type = 'call' AND scope_call_id IS NOT NULL AND scope_deal_id IS NULL) OR
-    (scope_type = 'deal' AND scope_deal_id IS NOT NULL AND scope_call_id IS NULL)
+    (scope_type = 'deal' AND scope_deal_id IS NOT NULL AND scope_call_id IS NULL) OR
+    (scope_type = 'global' AND scope_call_id IS NULL AND scope_deal_id IS NULL)
   )
 );
+
+-- Catch-up for the pre-existing table (this constraint predates 'global' scope).
+ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_scope_type_check;
+ALTER TABLE conversations ADD CONSTRAINT conversations_scope_type_check
+  CHECK (scope_type IN ('call', 'deal', 'global'));
+ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_scope_coherent;
+ALTER TABLE conversations ADD CONSTRAINT conversations_scope_coherent CHECK (
+  (scope_type = 'call' AND scope_call_id IS NOT NULL AND scope_deal_id IS NULL) OR
+  (scope_type = 'deal' AND scope_deal_id IS NOT NULL AND scope_call_id IS NULL) OR
+  (scope_type = 'global' AND scope_call_id IS NULL AND scope_deal_id IS NULL)
+);
+
+-- Reverted: focus_deal_ids/focus_call_ids briefly lived on this table as a
+-- conversation-level (creation-time) setting. Narrowing 'global' scope
+-- needs to vary per question in an ongoing thread, not be fixed for the
+-- whole conversation, so it's now a POST /messages request field instead
+-- (chatService.postMessage), applied for that turn only and recorded in
+-- that message's context_stats — not persisted as its own column.
+ALTER TABLE conversations DROP COLUMN IF EXISTS focus_deal_ids;
+ALTER TABLE conversations DROP COLUMN IF EXISTS focus_call_ids;
 
 CREATE INDEX IF NOT EXISTS conversations_user_id_idx ON conversations (user_id);
 

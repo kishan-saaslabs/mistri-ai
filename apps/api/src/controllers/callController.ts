@@ -1,15 +1,18 @@
 import type { Request, Response } from "express";
-import { createReadStream } from "node:fs";
 import { requireUser } from "../middleware/auth.js";
+import { verifyProviderAudio } from "../lib/providerAudioUrl.js";
 import {
   CallService,
   DealService,
   addDealUserSchema,
+  completeUploadSchema,
   createDealSchema,
   linkCallSchema,
+  presignUploadSchema,
   publicApiBase,
   toPublicCall,
   updateCallSchema,
+  type RecordingSource,
 } from "../services/callService.js";
 import { publishInferAndRenameJob } from "../queue/inferAndRenameQueue.js";
 import { CallInsightService } from "../services/callInsightService.js";
@@ -71,50 +74,7 @@ export const CallController = {
   audio: asyncHandler(async (req: Request, res: Response) => {
     const actor = requireUser(req);
     const file = await CallService.audioFile(actor.id, String(req.params.id));
-    if (file.size <= 0) {
-      res.setHeader("Content-Type", file.mime);
-      res.setHeader("Cache-Control", "private, no-store");
-      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-      res.setHeader("Content-Length", 0);
-      res.end();
-      return;
-    }
-
-    const range = parseByteRange(req.headers.range, file.size);
-
-    res.setHeader("Accept-Ranges", "bytes");
-    res.setHeader("Content-Type", file.mime);
-    res.setHeader("Cache-Control", "private, no-store");
-    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename="${file.downloadName}"`,
-    );
-
-    if (req.headers.range && !range) {
-      res.setHeader("Content-Range", `bytes */${file.size}`);
-      res.status(416).end();
-      return;
-    }
-
-    const start = range?.start ?? 0;
-    const end = range?.end ?? file.size - 1;
-    const stream = createReadStream(file.abs, { start, end });
-    stream.on("error", () => {
-      if (!res.headersSent) {
-        res.status(404).json({ error: "Recording not found" });
-        return;
-      }
-      res.destroy();
-    });
-    req.on("close", () => stream.destroy());
-
-    if (range) {
-      res.status(206);
-      res.setHeader("Content-Range", `bytes ${start}-${end}/${file.size}`);
-    }
-    res.setHeader("Content-Length", end - start + 1);
-    stream.pipe(res);
+    await sendRecording(req, res, file);
   }),
 
   update: asyncHandler(async (req: Request, res: Response) => {
@@ -133,10 +93,25 @@ export const CallController = {
       typeof req.body.dealId === "string" && req.body.dealId.length > 0 ? req.body.dealId : null;
     const call = await CallService.createFromUpload({
       originalName: req.file.originalname,
-      storedName: req.file.filename,
+      storedPath: req.file.path,
+      mimeType: req.file.mimetype,
       dealId,
       uploadedBy: actor.id,
     });
+    res.status(201).json({ call: toPublicCall(call, publicApiBase(req)) });
+  }),
+
+  presignUpload: asyncHandler(async (req: Request, res: Response) => {
+    const actor = requireUser(req);
+    const body = presignUploadSchema.parse(req.body);
+    const result = await CallService.presignUpload(actor.id, body);
+    res.status(201).json(result);
+  }),
+
+  completeUpload: asyncHandler(async (req: Request, res: Response) => {
+    const actor = requireUser(req);
+    const body = completeUploadSchema.parse(req.body);
+    const call = await CallService.completeUpload(actor.id, body);
     res.status(201).json({ call: toPublicCall(call, publicApiBase(req)) });
   }),
 
@@ -153,11 +128,18 @@ export const CallController = {
   file: asyncHandler(async (req: Request, res: Response) => {
     const actor = requireUser(req);
     const recording = await CallService.recordingFile(actor.id, String(req.params.id));
-    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-    res.setHeader("Cache-Control", "private, no-store");
-    res.setHeader("Content-Type", recording.mimeType);
-    res.setHeader("Content-Disposition", `inline; filename="${recording.downloadName}"`);
-    res.sendFile(recording.absolutePath);
+    await sendRecording(req, res, recording);
+  }),
+
+  providerAudio: asyncHandler(async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const expires = typeof req.query.e === "string" ? req.query.e : "";
+    const sig = typeof req.query.s === "string" ? req.query.s : "";
+    if (!verifyProviderAudio(id, expires, sig)) {
+      throw new HttpError(404, "Recording not found");
+    }
+    const recording = await CallService.recordingForProvider(id);
+    await sendRecording(req, res, recording);
   }),
 
   transcriptions: asyncHandler(async (req: Request, res: Response) => {
@@ -169,7 +151,7 @@ export const CallController = {
   retranscribe: asyncHandler(async (req: Request, res: Response) => {
     const actor = requireUser(req);
     const result = await CallService.get(actor.id, String(req.params.id));
-    if (!result.call.storage_path) {
+    if (!result.call.storage_path && !result.call.source_url) {
       throw new HttpError(400, "Call has no uploaded file to transcribe");
     }
     await TranscriptionService.transcribeCall(result.call.id);
@@ -209,6 +191,50 @@ export const CallController = {
     res.json({ insights });
   }),
 };
+
+async function sendRecording(req: Request, res: Response, file: RecordingSource) {
+  if (file.size <= 0) {
+    res.setHeader("Content-Type", file.mime);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.setHeader("Content-Length", 0);
+    res.end();
+    return;
+  }
+
+  const range = parseByteRange(req.headers.range, file.size);
+
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Content-Type", file.mime);
+  res.setHeader("Cache-Control", "private, no-store");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  res.setHeader("Content-Disposition", `inline; filename="${file.downloadName}"`);
+
+  if (req.headers.range && !range) {
+    res.setHeader("Content-Range", `bytes */${file.size}`);
+    res.status(416).end();
+    return;
+  }
+
+  const start = range?.start ?? 0;
+  const end = range?.end ?? file.size - 1;
+  const stream = await file.open(range ?? undefined);
+  stream.on("error", () => {
+    if (!res.headersSent) {
+      res.status(404).json({ error: "Recording not found" });
+      return;
+    }
+    res.destroy();
+  });
+  req.on("close", () => stream.destroy());
+
+  if (range) {
+    res.status(206);
+    res.setHeader("Content-Range", `bytes ${start}-${end}/${file.size}`);
+  }
+  res.setHeader("Content-Length", end - start + 1);
+  stream.pipe(res);
+}
 
 function parseByteRange(
   header: string | undefined,

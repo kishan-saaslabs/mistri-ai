@@ -13,12 +13,15 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
+    "reindex": "tsx src/db/reindex.ts",
     "evals": "tsx src/evals/runEvals.ts"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1110.0",
+    "@aws-sdk/s3-request-presigner": "^3.1110.0",
     "@bull-board/api": "^8.6.1",
     "@bull-board/express": "^8.6.1",
     "@mistri-ai/ai": "workspace:*",

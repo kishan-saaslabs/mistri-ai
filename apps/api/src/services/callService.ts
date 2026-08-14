@@ -1,17 +1,21 @@
-import { stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { stat, unlink } from "node:fs/promises";
 import {
   basename,
-  extname,
   isAbsolute,
   relative,
   resolve,
-  sep,
 } from "node:path";
+import type { Readable } from "node:stream";
 import { z } from "zod";
-import { audioMimeByExt, uploadRoot } from "../middleware/upload.js";
-import { existsSync } from "node:fs";
 import type { Request } from "express";
 import { env } from "../config/env.js";
+import {
+  isAllowedAudioFile,
+  mimeForAudio,
+  sanitizeDownloadName,
+} from "../lib/audioFile.js";
+import { uploadRoot } from "../middleware/upload.js";
 import { CallModel, type CallRecord } from "../models/callModel.js";
 import { CallTranscriptModel } from "../models/callTranscriptModel.js";
 import { DealModel, type DealRecord } from "../models/dealModel.js";
@@ -25,6 +29,16 @@ import {
   UserModel,
 } from "../models/userModel.js";
 import { HttpError } from "../utils/httpError.js";
+import {
+  assertOwnedObjectKey,
+  getObjectStream,
+  headObject,
+  isObjectKey,
+  newObjectKey,
+  objectStorage,
+  presignPut,
+  putFile,
+} from "./objectStorage.js";
 import { TranscriptionService } from "./transcriptionService.js";
 
 const uuid = z.string().uuid();
@@ -47,13 +61,18 @@ export const addDealUserSchema = z.object({
   userIds: z.array(z.string().uuid()).min(1).max(100),
 });
 
-const mimeByExt: Record<string, string> = {
-  ".mp3": "audio/mpeg",
-  ".wav": "audio/wav",
-  ".m4a": "audio/mp4",
-  ".mp4": "video/mp4",
-  ".webm": "audio/webm",
-};
+export const presignUploadSchema = z.object({
+  filename: z.string().trim().min(1).max(240),
+  contentType: z.string().trim().max(100).optional(),
+  size: z.number().int().positive(),
+  dealId: z.string().uuid().nullable().optional(),
+});
+
+export const completeUploadSchema = z.object({
+  objectKey: z.string().trim().min(1).max(512),
+  filename: z.string().trim().min(1).max(240),
+  dealId: z.string().uuid().nullable().optional(),
+});
 
 export type PublicCall = Omit<CallRecord, "storage_path"> & {
   fileUrl: string | null;
@@ -78,27 +97,6 @@ export function toPublicCall(call: CallRecord, apiBaseUrl: string): PublicCall {
   };
 }
 
-function resolveStoredFile(storagePath: string): string {
-  const name = basename(storagePath);
-  if (!name || name !== storagePath.replaceAll("\\", "/").split("/").pop()) {
-    throw new HttpError(404, "Recording not found");
-  }
-  const absolutePath = resolve(uploadRoot, name);
-  const rel = relative(uploadRoot, absolutePath);
-  if (!rel || rel.startsWith("..") || rel.includes(`..${sep}`)) {
-    throw new HttpError(404, "Recording not found");
-  }
-  if (!existsSync(absolutePath)) {
-    throw new HttpError(404, "Recording not found");
-  }
-  return absolutePath;
-}
-
-function sanitizeDownloadName(raw: string | null, fallback: string): string {
-  const base = basename(raw || fallback).replace(/[^\w.\-]+/g, "_");
-  return base.slice(0, 120) || "recording";
-}
-
 function sanitizeLabel(raw: string) {
   return raw.replace(/[<>]/g, "").trim().slice(0, 200);
 }
@@ -115,6 +113,77 @@ function safeUploadPath(storedName: string) {
     throw new HttpError(404, "Recording not found");
   }
   return abs;
+}
+
+export type RecordingSource = {
+  size: number;
+  mime: string;
+  downloadName: string;
+  open: (range?: { start: number; end: number }) => Promise<Readable>;
+};
+
+async function loadRecording(call: CallRecord): Promise<RecordingSource> {
+  const storagePath = call.storage_path;
+  if (!storagePath) {
+    throw new HttpError(404, "Recording not found");
+  }
+  const downloadName = sanitizeDownloadName(call.filename, storagePath);
+  const mime = mimeForAudio(call.filename || storagePath);
+
+  if (isObjectKey(storagePath)) {
+    const meta = await headObject(storagePath);
+    return {
+      size: meta.contentLength,
+      mime: meta.contentType || mime,
+      downloadName,
+      open: async (range) => {
+        const result = await getObjectStream(storagePath, range);
+        return result.stream;
+      },
+    };
+  }
+
+  const abs = safeUploadPath(storagePath);
+  let fileStat;
+  try {
+    fileStat = await stat(abs);
+  } catch {
+    throw new HttpError(404, "Recording not found");
+  }
+  if (!fileStat.isFile()) {
+    throw new HttpError(404, "Recording not found");
+  }
+  return {
+    size: fileStat.size,
+    mime,
+    downloadName,
+    open: async (range) =>
+      createReadStream(abs, range ? { start: range.start, end: range.end } : undefined),
+  };
+}
+
+async function createStoredCall(input: {
+  actor: UserRecord;
+  filename: string;
+  objectKey: string;
+  dealId: string | null;
+}) {
+  const label =
+    sanitizeLabel(input.filename.replace(/\.[^/.]+$/, "")) || "Uploaded call";
+  const call = await CallModel.create({
+    organizationId: input.actor.organization_id,
+    dealId: input.dealId,
+    uploadedBy: input.actor.id,
+    label,
+    filename: input.filename,
+    storagePath: input.objectKey,
+    status: "PROCESSING",
+  });
+  if (!call) {
+    throw new HttpError(500, "Could not create call", false);
+  }
+  startTranscription(call.id);
+  return call;
 }
 
 async function loadActor(userId: string): Promise<UserRecord> {
@@ -273,22 +342,16 @@ export const CallService = {
     if (!call.storage_path) {
       throw new HttpError(404, "No uploaded recording");
     }
-    const abs = safeUploadPath(call.storage_path);
-    let fileStat;
-    try {
-      fileStat = await stat(abs);
-    } catch {
+    return loadRecording(call);
+  },
+
+  async recordingForProvider(id: string) {
+    uuid.parse(id);
+    const call = await CallModel.findById(id);
+    if (!call?.storage_path) {
       throw new HttpError(404, "Recording not found");
     }
-    if (!fileStat.isFile()) {
-      throw new HttpError(404, "Recording not found");
-    }
-    const ext = extname(abs).toLowerCase();
-    const mime = audioMimeByExt[ext] ?? "application/octet-stream";
-    const rawName = basename(call.filename || `recording${ext || ".bin"}`);
-    const downloadName =
-      rawName.replace(/[^\w.\-]+/g, "_").slice(0, 120) || `recording${ext}`;
-    return { abs, size: fileStat.size, mime, downloadName };
+    return loadRecording(call);
   },
 
   async mapDeal(actorId: string, id: string, dealId: string | null) {
@@ -307,55 +370,102 @@ export const CallService = {
     return updated;
   },
 
+  async presignUpload(
+    actorId: string,
+    input: z.infer<typeof presignUploadSchema>,
+  ) {
+    if (!objectStorage.isConfigured()) {
+      throw new HttpError(503, "Object storage is not configured");
+    }
+    const actor = await loadActor(actorId);
+    await assertCanAssignDeal(actor, input.dealId);
+    if (!isAllowedAudioFile(input.filename, input.contentType)) {
+      throw new HttpError(400, "Unsupported file type. Use MP3, WAV, M4A, or MP4.");
+    }
+    if (input.size > env.MAX_UPLOAD_BYTES) {
+      throw new HttpError(413, "File too large");
+    }
+
+    const contentType = mimeForAudio(input.filename, input.contentType);
+    const objectKey = newObjectKey(actor.organization_id, input.filename);
+    const uploadUrl = await presignPut(objectKey, contentType);
+    return {
+      objectKey,
+      uploadUrl,
+      headers: { "Content-Type": contentType },
+      expiresIn: env.S3_PRESIGN_PUT_EXPIRES_SECONDS,
+    };
+  },
+
+  async completeUpload(
+    actorId: string,
+    input: z.infer<typeof completeUploadSchema>,
+  ) {
+    const actor = await loadActor(actorId);
+    await assertCanAssignDeal(actor, input.dealId);
+    if (!isAllowedAudioFile(input.filename)) {
+      throw new HttpError(400, "Unsupported file type. Use MP3, WAV, M4A, or MP4.");
+    }
+
+    const objectKey = assertOwnedObjectKey(input.objectKey, actor.organization_id);
+    const meta = await headObject(objectKey);
+    if (meta.contentLength <= 0) {
+      throw new HttpError(400, "Upload did not complete");
+    }
+    if (meta.contentLength > env.MAX_UPLOAD_BYTES) {
+      throw new HttpError(413, "File too large");
+    }
+
+    return createStoredCall({
+      actor,
+      filename: basename(input.filename),
+      objectKey,
+      dealId: input.dealId ?? null,
+    });
+  },
+
   async createFromUpload(input: {
     originalName: string;
-    storedName: string;
+    storedPath: string;
     dealId?: string | null;
     uploadedBy: string;
+    mimeType?: string;
   }) {
     const actor = await loadActor(input.uploadedBy);
     await assertCanAssignDeal(actor, input.dealId);
-
-    const filename = basename(input.originalName);
-    const label =
-      sanitizeLabel(filename.replace(/\.[^/.]+$/, "")) || "Uploaded call";
-
-    const call = await CallModel.create({
-      organizationId: actor.organization_id,
-      dealId: input.dealId ?? null,
-      uploadedBy: input.uploadedBy,
-      label,
-      filename,
-      storagePath: input.storedName,
-      status: "PROCESSING",
-    });
-
-    if (!call) {
-      throw new HttpError(500, "Could not create call", false);
+    if (!objectStorage.isConfigured()) {
+      throw new HttpError(503, "Object storage is not configured");
+    }
+    if (!isAllowedAudioFile(input.originalName, input.mimeType)) {
+      throw new HttpError(400, "Unsupported file type. Use MP3, WAV, M4A, or MP4.");
     }
 
-    startTranscription(call.id);
-    return call;
+    const filename = basename(input.originalName);
+    const objectKey = newObjectKey(actor.organization_id, filename);
+    try {
+      await putFile(objectKey, input.storedPath, mimeForAudio(filename, input.mimeType));
+    } finally {
+      try {
+        await unlink(input.storedPath);
+      } catch {
+        // temp upload already gone
+      }
+    }
+
+    return createStoredCall({
+      actor,
+      filename,
+      objectKey,
+      dealId: input.dealId ?? null,
+    });
   },
 
   async recordingFile(actorId: string, id: string) {
-    uuid.parse(id);
-    const actor = await loadActor(actorId);
-    const call = await CallModel.findById(id);
-    if (!call) {
-      throw new HttpError(404, "Call not found");
-    }
-    await assertCallAccess(actor, call);
+    const call = await CallService.requireCall(actorId, id);
     if (!call.storage_path) {
       throw new HttpError(404, "Recording not found");
     }
-    const absolutePath = resolveStoredFile(call.storage_path);
-    const ext = extname(call.filename || call.storage_path).toLowerCase();
-    return {
-      absolutePath,
-      mimeType: mimeByExt[ext] ?? "application/octet-stream",
-      downloadName: sanitizeDownloadName(call.filename, call.storage_path),
-    };
+    return loadRecording(call);
   },
 
   async createFromLink(
@@ -367,7 +477,7 @@ export const CallService = {
     const host = new URL(input.url).hostname.replace(/^www\./, "");
     const label = sanitizeLabel(input.label || `Linked call — ${host}`);
 
-    return CallModel.create({
+    const call = await CallModel.create({
       organizationId: actor.organization_id,
       dealId: input.dealId ?? null,
       uploadedBy: input.uploadedBy,
@@ -376,6 +486,11 @@ export const CallService = {
       sourceUrl: input.url,
       status: "PROCESSING",
     });
+    if (!call) {
+      throw new HttpError(500, "Could not create call", false);
+    }
+    startTranscription(call.id);
+    return call;
   },
 };
 

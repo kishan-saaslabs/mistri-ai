@@ -1,34 +1,13 @@
 import { mkdirSync } from "node:fs";
-import { extname, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { extname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
 import { env } from "../config/env.js";
+import { ALLOWED_AUDIO_EXT, ALLOWED_AUDIO_MIME } from "../lib/audioFile.js";
 import { HttpError } from "../utils/httpError.js";
 
-const allowedMime = new Set([
-  "audio/mpeg",
-  "audio/mp3",
-  "audio/wav",
-  "audio/x-wav",
-  "audio/wave",
-  "audio/mp4",
-  "audio/m4a",
-  "audio/x-m4a",
-  "audio/webm",
-  "video/mp4",
-]);
-
-const allowedExt = new Set([".mp3", ".wav", ".m4a", ".mp4", ".webm"]);
-
-export const audioMimeByExt: Record<string, string> = {
-  ".mp3": "audio/mpeg",
-  ".wav": "audio/wav",
-  ".m4a": "audio/mp4",
-  ".mp4": "video/mp4",
-  ".webm": "audio/webm",
-};
-
-export const uploadRoot = resolve(process.cwd(), env.UPLOAD_DIR);
+export const uploadRoot = join(tmpdir(), "mistri-uploads");
 mkdirSync(uploadRoot, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -37,7 +16,7 @@ const storage = multer.diskStorage({
   },
   filename: (_req, file, cb) => {
     const ext = extname(file.originalname).toLowerCase();
-    const safeExt = allowedExt.has(ext) ? ext : ".bin";
+    const safeExt = ALLOWED_AUDIO_EXT.has(ext) ? ext : ".bin";
     cb(null, `${randomUUID()}${safeExt}`);
   },
 });
@@ -47,7 +26,7 @@ export const callUpload = multer({
   limits: { fileSize: env.MAX_UPLOAD_BYTES, files: 1 },
   fileFilter: (_req, file, cb) => {
     const ext = extname(file.originalname).toLowerCase();
-    if (!allowedMime.has(file.mimetype) && !allowedExt.has(ext)) {
+    if (!ALLOWED_AUDIO_MIME.has(file.mimetype) && !ALLOWED_AUDIO_EXT.has(ext)) {
       cb(new HttpError(400, "Unsupported file type. Use MP3, WAV, M4A, or MP4."));
       return;
     }

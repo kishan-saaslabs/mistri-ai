@@ -350,13 +350,43 @@ export const callsApi = {
 
   audioUrl: (id: string) => `/api/calls/${id}/audio`,
 
-  uploadToDeal: (dealId: string, file: File) => {
-    const form = new FormData();
-    form.append("file", file);
-    form.append("dealId", dealId);
-    return request<{ call: Call }>("/calls/upload", {
+  uploadToDeal: async (dealId: string, file: File) => {
+    const contentType = file.type || undefined;
+    const presign = await request<{
+      objectKey: string;
+      uploadUrl: string;
+      headers: Record<string, string>;
+    }>("/calls/uploads/presign", {
       method: "POST",
-      body: form,
+      body: JSON.stringify({
+        filename: file.name,
+        contentType,
+        size: file.size,
+        dealId,
+      }),
+    });
+
+    let uploaded: Response;
+    try {
+      uploaded = await fetch(presign.uploadUrl, {
+        method: "PUT",
+        headers: presign.headers,
+        body: file,
+      });
+    } catch {
+      throw new ApiError(0, "Could not reach object storage — is MinIO running?");
+    }
+    if (!uploaded.ok) {
+      throw new ApiError(uploaded.status, "Could not upload the recording.");
+    }
+
+    return request<{ call: Call }>("/calls/uploads/complete", {
+      method: "POST",
+      body: JSON.stringify({
+        objectKey: presign.objectKey,
+        filename: file.name,
+        dealId,
+      }),
     }).then((r) => r.call);
   },
 

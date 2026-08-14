@@ -9,7 +9,7 @@ import {
 } from "@mistri-ai/ai";
 import { CallInsightModel } from "../models/callInsightModel.js";
 import { ChunkModel } from "../models/chunkModel.js";
-import { ConversationModel, type ChatScopeType } from "../models/conversationModel.js";
+import { ConversationModel, type ChatScopeType, type ConversationRecord } from "../models/conversationModel.js";
 import { MessageModel } from "../models/messageModel.js";
 import { TopicSegmentModel } from "../models/topicSegmentModel.js";
 import { UserModel } from "../models/userModel.js";
@@ -144,7 +144,35 @@ function formatStructuredLiteAnswer(
   }
 }
 
+function toPublicConversation(row: ConversationRecord) {
+  return {
+    id: row.id,
+    scope_type: row.scope_type,
+    scope_call_id: row.scope_call_id,
+    scope_deal_id: row.scope_deal_id,
+    title: row.title,
+    turn_count: row.turn_count,
+    created_at: row.created_at,
+    last_activity_at: row.last_activity_at,
+  };
+}
+
 export const ChatService = {
+  async listConversations(
+    actorId: string,
+    filters: { scopeCallId?: string; scopeDealId?: string } = {},
+  ) {
+    const actor = await UserModel.findById(actorId);
+    if (!actor) throw new HttpError(401, "Authentication required");
+    const rows = await ConversationModel.listForUser({
+      userId: actor.id,
+      organizationId: actor.organization_id,
+      scopeCallId: filters.scopeCallId,
+      scopeDealId: filters.scopeDealId,
+    });
+    return rows.map(toPublicConversation);
+  },
+
   async createConversation(
     actorId: string,
     input: { scopeType: ChatScopeType; scopeCallId?: string; scopeDealId?: string },
@@ -167,24 +195,68 @@ export const ChatService = {
     };
   },
 
+  async searchConversations(
+    actorId: string,
+    input: { q: string; scopeCallId?: string; scopeDealId?: string },
+  ) {
+    const actor = await UserModel.findById(actorId);
+    if (!actor) throw new HttpError(401, "Authentication required");
+    const rows = await ConversationModel.searchForUser({
+      userId: actor.id,
+      organizationId: actor.organization_id,
+      q: input.q,
+      scopeCallId: input.scopeCallId,
+      scopeDealId: input.scopeDealId,
+    });
+    return rows.map(toPublicConversation);
+  },
+
+  async deleteConversation(actorId: string, conversationId: string) {
+    const actor = await UserModel.findById(actorId);
+    if (!actor) throw new HttpError(401, "Authentication required");
+    const deleted = await ConversationModel.deleteForUser({
+      id: conversationId,
+      userId: actor.id,
+      organizationId: actor.organization_id,
+    });
+    if (!deleted) throw new HttpError(404, "Conversation not found");
+  },
+
   listMessages(conversationId: string) {
     return MessageModel.listByConversationId(conversationId);
   },
 
-  async postMessage(actorId: string, conversationId: string, content: string) {
+  async postMessage(
+    actorId: string,
+    conversationId: string,
+    content: string,
+    options?: { focusDealIds?: string[]; focusCallIds?: string[] },
+  ) {
     const conversation = await ConversationModel.findById(conversationId);
     if (!conversation || conversation.user_id !== actorId) {
       throw new HttpError(404, "Conversation not found");
     }
 
+    const focusDealIds = options?.focusDealIds ?? [];
+    const focusCallIds = options?.focusCallIds ?? [];
+    const hasExplicitFocus = focusDealIds.length > 0 || focusCallIds.length > 0;
+    if (hasExplicitFocus && conversation.scope_type !== "global") {
+      throw new HttpError(400, "focusDealIds/focusCallIds are only meaningful for a 'global'-scope conversation");
+    }
+
     // Re-resolves scope (and therefore re-checks ACL) on EVERY turn, never
     // cached from conversation creation — a transcript transferred or
     // unassigned since this conversation started must stop being
-    // accessible immediately, not just for new conversations.
-    const scope = await RetrievalService.resolveChatScope(actorId, {
+    // accessible immediately, not just for new conversations. An explicit
+    // per-message focus is applied right here too — it's a THIS-TURN-ONLY
+    // narrowing, not persisted on the conversation, so a later message with
+    // a different (or no) focus isn't bound by an earlier one.
+    let scope = await RetrievalService.resolveChatScope(actorId, {
       scopeType: conversation.scope_type,
       scopeCallId: conversation.scope_call_id ?? undefined,
       scopeDealId: conversation.scope_deal_id ?? undefined,
+      focusDealIds,
+      focusCallIds,
     });
 
     const priorMessages = await MessageModel.listByConversationId(conversationId);
@@ -194,6 +266,21 @@ export const ChatService = {
 
     const chatClient = getChatLLMClient();
     const { standaloneQuery, isFollowup } = await contextualizeQuery(history, content, chatClient);
+
+    // With no explicit focus, a global-scope question can still name a
+    // deal right in its text — "what's happening in the Acme deal?" — and
+    // plain hybrid search over transcript text will never surface it,
+    // since deal names aren't spoken in calls, they're metadata. Detected
+    // per-turn, not persisted, so a later question with no deal name falls
+    // back to the full global scope rather than staying narrowed forever.
+    let detectedDealFocus: string | null = null;
+    if (conversation.scope_type === "global" && !hasExplicitFocus) {
+      const mention = await RetrievalService.detectDealMention(actorId, standaloneQuery);
+      if (mention) {
+        scope = await RetrievalService.scopeForDeal(actorId, mention.dealId);
+        detectedDealFocus = mention.dealName;
+      }
+    }
 
     if (scope.transcriptionIds.length === 0) {
       const answer = `I don't have any processed calls in ${scope.scopeDescription} to answer from yet.`;
@@ -366,6 +453,8 @@ export const ChatService = {
         carriedEvidenceUsed: fittedCarriedEvidence.length,
         citationsDropped: droppedCitations,
         attributionUncertain: anyAttributionUncertain,
+        detectedDealFocus,
+        explicitFocusApplied: hasExplicitFocus,
       },
     });
   },

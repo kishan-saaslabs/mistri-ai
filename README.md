@@ -6,12 +6,12 @@ Mistri AI records the shape of a deal from the call itself: transcript, deal hea
 
 | App | Stack | Path |
 | --- | --- | --- |
-| API | Express, Node.js, Postgres, JWT, Multer | `apps/api` |
+| API | Express, Node.js, Postgres, JWT, MinIO | `apps/api` |
 | Frontend | Vite, React Router, Tailwind CSS, shadcn/ui | `apps/frontend` |
 
 ## Quick start
 
-**Requirements:** Node.js 20+, [pnpm](https://pnpm.io/) 10+, Docker (for Postgres and Redis).
+**Requirements:** Node.js 20+, [pnpm](https://pnpm.io/) 10+, Docker (for Postgres, Redis, and MinIO).
 
 ```bash
 git clone https://github.com/kishan-saaslabs/mistri-ai.git
@@ -21,9 +21,9 @@ pnpm bootstrap
 pnpm dev
 ```
 
-`pnpm bootstrap` copies `.env` if needed, fills empty local secrets (`JWT_SECRET`, Postgres, seed password), starts Postgres (pgvector) and Redis, waits until they are healthy, migrates, and seeds. (`pnpm setup` is a pnpm CLI command and will not run this.)
+`pnpm bootstrap` copies `.env` if needed, fills empty local secrets (`JWT_SECRET`, Postgres, MinIO, seed password), starts Postgres (pgvector), Redis, and MinIO, waits until they are healthy, migrates, and seeds. (`pnpm setup` is a pnpm CLI command and will not run this.)
 
-Add `PYAI_API_KEY` and `LLM_API_KEY` in `.env` when you want live transcription and deal notes. Do not commit `.env`.
+Add `PYAI_API_KEY` and `LLM_API_KEY` in `.env` when you want live transcription and deal notes. For large recordings, set `S3_PUBLIC_ENDPOINT` to a public **https** origin that reaches MinIO (or use S3/R2) so PyAI can fetch the file. Do not commit `.env`.
 
 - Frontend: http://localhost:5173
 - API health: http://localhost:3001/health
@@ -31,18 +31,21 @@ Add `PYAI_API_KEY` and `LLM_API_KEY` in `.env` when you want live transcription 
 - OpenAPI JSON: http://localhost:3001/openapi.json
 - Demo login: `demo@mistri.ai` (password is `SEED_USER_PASSWORD` in `.env`)
 
+`pnpm dev` opens a Cloudflare quick tunnel to the API so PyAI can fetch large recordings. Disable with `DEV_TUNNEL=0` (or `pnpm dev:local`).
+
 The UI ships with demo call data so you can explore Calls, Deals, and Ask Mistri without wiring a live transcription pipeline. Uploads and auth persist through the API once Postgres is running.
 
 ## Workspace scripts
 
 | Command | What it does |
 | --- | --- |
-| `pnpm bootstrap` | Create `.env` if missing, start Postgres + Redis, migrate, seed |
-| `pnpm dev` | Run API and frontend together |
+| `pnpm bootstrap` | Create `.env` if missing, start Postgres + Redis + MinIO, migrate, seed |
+| `pnpm dev` | Run API and frontend; opens a public https tunnel for PyAI large-file fetch |
+| `pnpm dev:local` | Same without the tunnel (`DEV_TUNNEL=0`) |
 | `pnpm dev:api` / `pnpm dev:frontend` | Run one app |
 | `pnpm build` | Typecheck and build both apps |
 | `pnpm typecheck` | Typecheck both apps |
-| `pnpm docker:up` | Start Postgres and Redis and wait until healthy |
+| `pnpm docker:up` | Start Postgres, Redis, and MinIO and wait until healthy |
 | `pnpm db:up` | Start Postgres via Docker Compose |
 | `pnpm redis:up` | Start Redis via Docker Compose (BullMQ job queue) |
 | `pnpm db:migrate` | Apply SQL schema |
@@ -64,7 +67,9 @@ Authenticated routes expect `Authorization: Bearer <token>`.
 | `GET` | `/api/calls/:id/transcriptions` | JSON array of segment objects |
 | `POST` | `/api/calls/:id/transcribe` | re-run PyAI Hear on the stored file |
 | `POST` | `/api/calls/:id/infer-and-rename` | `202`, queues a BullMQ job (`apps/ai` inference); no polling endpoint yet |
-| `POST` | `/api/calls/upload` | multipart `file` + optional `dealId`; transcribes via PyAI |
+| `POST` | `/api/calls/uploads/presign` | JSON `{ filename, contentType?, size, dealId? }` → presigned PUT |
+| `POST` | `/api/calls/uploads/complete` | JSON `{ objectKey, filename, dealId? }`; transcribes via PyAI |
+| `POST` | `/api/calls/upload` | multipart `file` + optional `dealId` (API copies into object storage) |
 | `POST` | `/api/calls/link` | JSON `{ url, dealId? }` |
 
 Passwords are hashed with bcryptjs. JWT secrets and database credentials come from the environment only.
